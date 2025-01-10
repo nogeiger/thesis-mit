@@ -1,33 +1,38 @@
 import time
 from avp_stream import VisionProStreamer
 
-avp_ip = "192.168.24.10"  # Replace with your actual IP
+avp_ip = "10.31.190.119"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 # Open a text file for writing
 with open('streamed_data.txt', 'w') as f:
     start_time = time.time()  # Capture the start time
+    last_written_time = 0  # Initialize the last written timestamp
+    timestep = 0.005  # Desired time interval (5 ms)
+    next_timestep = timestep  # Start with the first timestep
+
     try:
         while True:
-            r = s.latest
-            #print("Raw data from streamer:", r)
-            # Calculate relative timestamp, so that it starts from 0
-            relative_timestamp = time.time() - start_time
+            current_time = time.time()
+            relative_timestamp = current_time - start_time
 
-            # Write data to the text file
-            f.write(f"Timestamp: {relative_timestamp:.6f}\n")
-            f.write(f"Head: {r['head'].tolist()}\n")
-            f.write(f"Right Wrist: {r['right_wrist'].tolist()}\n")
-            #f.write(f"Left Wrist: {r['left_wrist'].tolist()}\n")
-            #f.write(f"Right Fingers: {r['right_fingers'].tolist()}\n")
-            #f.write(f"Left Fingers: {r['left_fingers'].tolist()}\n")
-            #f.write(f"Right Pinch Distance: {r['right_pinch_distance']:.6f}\n")
-            #f.write(f"Left Pinch Distance: {r['left_pinch_distance']:.6f}\n")
-            #f.write(f"Right Wrist Roll: {r['right_wrist_roll']:.6f}\n")
-            #f.write(f"Left Wrist Roll: {r['left_wrist_roll']:.6f}\n")
-            f.write("\n")  # Separate each frame with a blank line
-            break
-            # Flush to ensure data is written immediately
-            f.flush()
+            # Check if the current relative timestamp has reached or exceeded the next timestep
+            if relative_timestamp >= next_timestep:
+                r = s.latest  # Get the latest data
+
+                # Write data to the text file
+                f.write(f"Timestamp: {next_timestep:.6f}\n")
+                f.write(f"Right Wrist: {r['right_wrist'].tolist()}\n")
+                f.write("\n")  # Separate each frame with a blank line
+
+                # Flush to ensure data is written immediately
+                f.flush()
+
+                # Update the next timestep
+                next_timestep += timestep
+
+            # Sleep for a short duration to avoid busy waiting
+            time.sleep(0.001)  # 1 ms sleep to reduce CPU usage
+
     except KeyboardInterrupt:
         print("Data streaming stopped. Saved to streamed_data.txt")
