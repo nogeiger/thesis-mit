@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -126,44 +127,55 @@ def generate_data(num_samples=10000, seq_length=100):
     return data
 
 
-def load_robot_data(filepath, seq_length):
+def load_robot_data(folder_path, seq_length):
     """
-    Loads real trajectory data from a file and formats it like the generated data.
+    Loads real trajectory data from all text files in a folder and formats it like the generated data.
 
     Args:
-        filepath (str): Path to the input file.
+        folder_path (str): Path to the folder containing the input text files.
         seq_length (int): Length of each trajectory segment.
 
     Returns:
-        list: A list of dictionaries, each containing 'pos_0' with shape [seq_length, 3].
+        list: A combined list of dictionaries, each containing 'pos_0' with shape [seq_length, 3].
     """
-    try:
-        # Load the data while skipping the header row
-        df = pd.read_csv(filepath, sep="\t", skiprows=1, header=None)
-        df.columns = ["Time", "Pos_0_x", "Pos_0_y", "Pos_0_z", "Pos_x", "Pos_y", "Pos_z", "Force_x", "Force_y", "Force_z"]
+    all_data = []
 
-        # Verify the total rows and sequence length
-        if len(df) < seq_length:
-            raise ValueError(f"The data contains fewer rows ({len(df)}) than the required sequence length ({seq_length}).")
+    # Iterate over all text files in the folder
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".txt"):  # Process only text files
+            filepath = os.path.join(folder_path, filename)
+            try:
+                # Load the data while skipping the header row
+                df = pd.read_csv(filepath, sep="\t", skiprows=1, header=None)
+                df.columns = ["Time", "Pos_0_x", "Pos_0_y", "Pos_0_z", "Pos_x", "Pos_y", "Pos_z", "Force_x", "Force_y", "Force_z"]
 
-        # Extract clean trajectories for x, y, z and stack them
-        data = []
-        for i in range(0, len(df) - seq_length + 1, seq_length):
-            clean_trajectory = np.stack([
-                df["Pos_0_x"].iloc[i:i + seq_length].values,
-                df["Pos_0_y"].iloc[i:i + seq_length].values,
-                df["Pos_0_z"].iloc[i:i + seq_length].values,
-            ], axis=-1)  # Shape: [seq_length, 3]
+                # Verify the total rows and sequence length
+                if len(df) < seq_length:
+                    print(f"Skipping file {filename} as it contains fewer rows ({len(df)}) than the required sequence length ({seq_length}).")
+                    continue
 
-            sample = {"pos_0": clean_trajectory}
-            data.append(sample)
+                file_data = []  # Temporary storage for data from the current file
 
-        print(f"Loaded {len(data)} samples, each with a sequence length of {seq_length} in 3D.")
-        return data
+                # Extract clean trajectories for x, y, z and stack them
+                for i in range(0, len(df) - seq_length + 1, seq_length):
+                    clean_trajectory = np.stack([
+                        df["Pos_0_x"].iloc[i:i + seq_length].values,
+                        df["Pos_0_y"].iloc[i:i + seq_length].values,
+                        df["Pos_0_z"].iloc[i:i + seq_length].values,
+                    ], axis=-1)  # Shape: [seq_length, 3]
 
-    except Exception as e:
-        print(f"Error loading data from {filepath}: {e}")
-        return []
+                    sample = {"pos_0": clean_trajectory}
+                    file_data.append(sample)
+
+                print(f"Loaded {len(file_data)} samples from {filename}, each with a sequence length of {seq_length} in 3D.")
+                all_data.extend(file_data)
+
+            except Exception as e:
+                print(f"Error loading data from {filename}: {e}")
+
+    print(f"Total loaded samples from all files: {len(all_data)}")
+    return all_data
+
 
 # Loss Function
 def loss_function(predicted_noise, actual_noise):
@@ -290,7 +302,6 @@ class NoisePredictor(nn.Module):
         x = self.output_layer(x)
         return x.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
 
-# Training Loop for Diffusion
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
@@ -312,13 +323,20 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
     for epoch in range(num_epochs):
         total_loss = 0
+        batch_count = 0  # To count the number of batches used in the epoch
+        print(f"Starting epoch {epoch + 1}/{num_epochs}...")
 
-        for clean_trajectory in dataloader:
+        for batch_idx, clean_trajectory in enumerate(dataloader):
+            batch_count += 1
+            #print(f"Processing batch {batch_idx + 1}/{len(dataloader)}...")
+            
             clean_trajectory = clean_trajectory.to(device)
+            
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
-
+            
             optimizer.zero_grad()
+            
             # Predict the clean trajectory
             predicted_trajectory = model(noisy_trajectory)
             
@@ -326,13 +344,16 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
             loss = criterion(predicted_trajectory, clean_trajectory)
             loss.backward()
             optimizer.step()
-
+            
             total_loss += loss.item()
-            break
+
         avg_loss = total_loss / len(dataloader)
         epoch_losses.append(avg_loss)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+        #print(f"Total batches processed in epoch {epoch + 1}: {batch_count}")
+    
     return epoch_losses
+
 
 # Validation Loop for Diffusion
 def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_steps):
@@ -373,20 +394,21 @@ def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """
-    # Hyperparameters
+    # Hyperparametersprint
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 64
     batch_size = 4
-    num_epochs = 200
+    num_epochs = 1000
     learning_rate = 1e-3
-    noiseadding_steps = 5
+    noiseadding_steps = 10
 
     # File path to the real data
-    file_path = "Data/1D_diffusion/SimData/robot_data_output_7_sin.txt"
+    file_path = "Data/1D_diffusion/SimData/sin"
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
+    #print(f"Total loaded data shape: {len(data)} samples, each with shape {data[0]['pos_0'].shape}")
 
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
@@ -399,13 +421,10 @@ def main():
     train_data = normalized_data[:split]
     val_data = normalized_data[split:]
 
+    
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
-
-    print("Stats used for normalization:", stats)
-    print("First normalized sample:", data[0]["pos_0"])
-
 
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
