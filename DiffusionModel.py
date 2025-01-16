@@ -4,6 +4,101 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+
+def compute_statistics_per_axis(data):
+    """
+    Computes min and max for each axis (x, y, z) in the dataset for normalization.
+
+    Args:
+        data (list): A list of dictionaries containing clean trajectories.
+
+    Returns:
+        dict: A dictionary containing min and max for each axis (x, y, z).
+    """
+    data_concat = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
+    min_vals = torch.tensor(data_concat.min(axis=0), dtype=torch.float32)  # Shape: [3]
+    max_vals = torch.tensor(data_concat.max(axis=0), dtype=torch.float32)  # Shape: [3]
+
+    # Prevent division by zero
+    epsilon = 1e-8
+    max_vals = torch.where(max_vals == min_vals, max_vals + epsilon, max_vals)
+    return {"min": min_vals, "max": max_vals}
+
+
+def normalize_data_per_axis(data, stats):
+    """
+    Normalizes each axis (x, y, z) in the data.
+    Constant axes are assigned a fixed normalized value (e.g., 0.5).
+
+    Args:
+        data (list): A list of dictionaries containing clean trajectories.
+        stats (dict): Min and max values for normalization.
+
+    Returns:
+        list: A list of dictionaries with normalized trajectories.
+    """
+    normalized_data = []
+    for sample in data:
+        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Shape: [seq_length, 3]
+        min_vals, max_vals = stats["min"], stats["max"]
+
+        # Handle constant axes
+        range_vals = max_vals - min_vals
+        is_constant = range_vals == 0
+
+        # Avoid division by zero for non-constant axes
+        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
+        normalized_pos = (pos_0 - min_vals) / range_vals
+
+        # Assign fixed normalized value (e.g., 0.5) for constant axes
+        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
+            if is_constant[axis]:
+                normalized_pos[:, axis] = 0.5  # Fixed normalized value for constant axes
+
+        # Debugging: Check for anomalies
+        if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
+            print("Error: Found inf/nan in normalized_pos:", normalized_pos)
+
+        normalized_data.append({"pos_0": normalized_pos})
+
+    return normalized_data
+
+
+
+def denormalize_data_with_constant_axes(normalized_data, stats):
+    """
+    Denormalizes each axis (x, y, z) in the data.
+    Constant axes are restored to their original constant values.
+
+    Args:
+        normalized_data (list): Normalized trajectory data.
+        stats (dict): Min and max values for denormalization.
+
+    Returns:
+        list: A list of dictionaries with denormalized trajectories.
+    """
+    denormalized_data = []
+    for sample in normalized_data:
+        pos_0 = sample["pos_0"]
+        min_vals, max_vals = stats["min"], stats["max"]
+
+        # Handle constant axes
+        range_vals = max_vals - min_vals
+        is_constant = range_vals == 0
+
+        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
+        denormalized_pos = pos_0 * range_vals + min_vals
+
+        # Restore original constant values
+        for axis in range(pos_0.shape[-1]):
+            if is_constant[axis]:
+                denormalized_pos[:, axis] = min_vals[axis]  # Restore original constant value
+
+        denormalized_data.append({"pos_0": denormalized_pos})
+
+    return denormalized_data
+
 
 # Data Generation for synthetic data
 def generate_data(num_samples=10000, seq_length=100):
@@ -29,6 +124,46 @@ def generate_data(num_samples=10000, seq_length=100):
         data.append(sample)
     print(f"Generated {num_samples} samples, each with a sequence length of {seq_length} in 3D.")
     return data
+
+
+def load_robot_data(filepath, seq_length):
+    """
+    Loads real trajectory data from a file and formats it like the generated data.
+
+    Args:
+        filepath (str): Path to the input file.
+        seq_length (int): Length of each trajectory segment.
+
+    Returns:
+        list: A list of dictionaries, each containing 'pos_0' with shape [seq_length, 3].
+    """
+    try:
+        # Load the data while skipping the header row
+        df = pd.read_csv(filepath, sep="\t", skiprows=1, header=None)
+        df.columns = ["Time", "Pos_0_x", "Pos_0_y", "Pos_0_z", "Pos_x", "Pos_y", "Pos_z", "Force_x", "Force_y", "Force_z"]
+
+        # Verify the total rows and sequence length
+        if len(df) < seq_length:
+            raise ValueError(f"The data contains fewer rows ({len(df)}) than the required sequence length ({seq_length}).")
+
+        # Extract clean trajectories for x, y, z and stack them
+        data = []
+        for i in range(0, len(df) - seq_length + 1, seq_length):
+            clean_trajectory = np.stack([
+                df["Pos_0_x"].iloc[i:i + seq_length].values,
+                df["Pos_0_y"].iloc[i:i + seq_length].values,
+                df["Pos_0_z"].iloc[i:i + seq_length].values,
+            ], axis=-1)  # Shape: [seq_length, 3]
+
+            sample = {"pos_0": clean_trajectory}
+            data.append(sample)
+
+        print(f"Loaded {len(data)} samples, each with a sequence length of {seq_length} in 3D.")
+        return data
+
+    except Exception as e:
+        print(f"Error loading data from {filepath}: {e}")
+        return []
 
 # Loss Function
 def loss_function(predicted_noise, actual_noise):
@@ -58,7 +193,6 @@ def add_noise(clean_trajectory, noiseadding_steps):
     """
     noisy_trajectory = clean_trajectory.clone()
     for _ in range(noiseadding_steps):
-        #print("clean trajectorie shape:", clean_trajectory.shape)
         noise = torch.randn_like(clean_trajectory) * 0.1  # Scale the noise
         noisy_trajectory += noise
     return noisy_trajectory
@@ -84,26 +218,43 @@ class ImpedanceDatasetInitial(Dataset):
             torch.tensor(sample["pos_0"], dtype=torch.float32),
         )
 
-# Dataset Class for 3D Trajectories
 class ImpedanceDatasetDiffusion(Dataset):
     """
-    A dataset class for 3D diffusion-based training.
+    A dataset class for 3D diffusion-based training with per-axis normalization.
 
     Args:
         data (list): A list of dictionaries containing 3D clean trajectories.
+        stats (dict): A dictionary containing min and max for each axis (x, y, z).
 
     Returns:
-        torch.Tensor: Clean 3D trajectory (pos_0).
+        torch.Tensor: Normalized clean 3D trajectory (pos_0).
     """
-    def __init__(self, data):
+    def __init__(self, data, stats=None):
         self.data = data
+        self.stats = stats
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         sample = self.data[idx]
-        return torch.tensor(sample["pos_0"], dtype=torch.float32)  # Shape: [seq_length, 3]
+        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Already normalized
+        return pos_0
+
+    def denormalize(self, normalized_data):
+        """
+        Denormalizes the given data using stored statistics for each axis.
+
+        Args:
+            normalized_data (torch.Tensor): Normalized data to be denormalized.
+
+        Returns:
+            torch.Tensor: Denormalized data.
+        """
+        if self.stats:
+            return normalized_data * (self.stats["max"] - self.stats["min"]) + self.stats["min"]
+        else:
+            return normalized_data
 
 class NoisePredictor(nn.Module):
     """
@@ -137,7 +288,6 @@ class NoisePredictor(nn.Module):
         x = self.hidden_layer_2(x)
         x = self.relu(x)
         x = self.output_layer(x)
-        #print("output shape:", x.view(batch_size, seq_length, 3).shape)
         return x.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
 
 # Training Loop for Diffusion
@@ -159,26 +309,26 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     """
     model.train()
     epoch_losses = []
+
     for epoch in range(num_epochs):
         total_loss = 0
+
         for clean_trajectory in dataloader:
             clean_trajectory = clean_trajectory.to(device)
-            #print("clean_trajectory shape:", clean_trajectory.shape)
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
 
             optimizer.zero_grad()
-
             # Predict the clean trajectory
             predicted_trajectory = model(noisy_trajectory)
-
+            
             # Calculate loss
             loss = criterion(predicted_trajectory, clean_trajectory)
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
-
+            break
         avg_loss = total_loss / len(dataloader)
         epoch_losses.append(avg_loss)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
@@ -219,7 +369,6 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
     print(f"Validation Loss: {avg_loss:.4f}")
     return avg_loss
 
-# Main Execution
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
@@ -228,24 +377,41 @@ def main():
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 64
-    batch_size = 32
-    num_epochs = 20
+    batch_size = 4
+    num_epochs = 200
     learning_rate = 1e-3
     noiseadding_steps = 5
 
-    # Generate data
-    data = generate_data(num_samples=10000, seq_length=seq_length)
-    split = int(len(data) * 0.8)
-    train_data = data[:split]
-    val_data = data[split:]
+    # File path to the real data
+    file_path = "Data/1D_diffusion/SimData/robot_data_output_7_sin.txt"
 
-    # Datasets and Dataloaders
-    train_dataset = ImpedanceDatasetDiffusion(train_data)
-    val_dataset = ImpedanceDatasetDiffusion(val_data)
+    # Load real data
+    data = load_robot_data(file_path, seq_length)
 
+    # Compute per-axis normalization statistics
+    stats = compute_statistics_per_axis(data)
+
+    # Normalize data per axis
+    normalized_data = normalize_data_per_axis(data, stats)
+    
+    # Split into training and validation sets
+    split = int(len(normalized_data) * 0.8)
+    train_data = normalized_data[:split]
+    val_data = normalized_data[split:]
+
+    # Create datasets with per-axis normalization
+    train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
+    val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
+
+    print("Stats used for normalization:", stats)
+    print("First normalized sample:", data[0]["pos_0"])
+
+
+    # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
+    
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NoisePredictor(seq_length, hidden_dim).to(device)
@@ -255,7 +421,7 @@ def main():
     # Train and validate
     train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps)
     val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps)
-
+    
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
@@ -274,18 +440,23 @@ def main():
         noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
         predicted_trajectory = model(noisy_trajectory)
 
+    # Denormalize for visualization
+    clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu())
+    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu())
+    predicted_trajectory = val_dataset.denormalize(predicted_trajectory.cpu())
+
     # Plot predictions for all 3 dimensions
     plt.figure(figsize=(10, 5))
     for i, label in enumerate(['x', 'y', 'z']):
-        plt.plot(clean_trajectory[0, :, i].cpu().numpy(), label=f'Clean {label}')
-        plt.plot(noisy_trajectory[0, :, i].cpu().numpy(), linestyle='--', label=f'Noisy {label}')
-        plt.plot(predicted_trajectory[0, :, i].cpu().numpy(), linestyle='-.', label=f'Predicted {label}')
+        plt.plot(clean_trajectory[0, :, i], label=f'Clean {label}')
+        plt.plot(noisy_trajectory[0, :, i], linestyle='--', label=f'Noisy {label}')
+        plt.plot(predicted_trajectory[0, :, i], linestyle='-.', label=f'Predicted {label}')
     plt.xlabel('Time Step')
     plt.ylabel('Position')
     plt.title('Trajectory Prediction (3D)')
     plt.legend()
     plt.show()
-
+    
 
 if __name__ == "__main__":
     main()
