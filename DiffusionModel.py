@@ -19,13 +19,15 @@ def generate_data(num_samples=10000, seq_length=100):
     """
     data = []
     for _ in range(num_samples):
-        t = np.linspace(0, 10, seq_length)  # Timestamps
-        clean_trajectory = np.sin(t) + np.cos(2 * t)  # Example clean trajectory
+        t = np.linspace(0, 10, seq_length)
+        clean_trajectory_x = np.sin(t) + np.cos(2 * t)
+        clean_trajectory_y = np.sin(2 * t) + np.cos(t)
+        clean_trajectory_z = np.sin(3 * t) + np.cos(3 * t)
         sample = {
-            "pos_0": clean_trajectory,
+            "pos_0": np.stack([clean_trajectory_x, clean_trajectory_y, clean_trajectory_z], axis=-1),  # Shape: [seq_length, 3]
         }
         data.append(sample)
-    print(f"Generated {num_samples} samples, each with a sequence length of {seq_length}.")
+    print(f"Generated {num_samples} samples, each with a sequence length of {seq_length} in 3D.")
     return data
 
 # Loss Function
@@ -42,20 +44,21 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
-# Add Noise Function
+# Add Noise Function for 3D Trajectories
 def add_noise(clean_trajectory, noiseadding_steps):
     """
-    Dynamically adds Gaussian noise to a clean trajectory.
+    Dynamically adds Gaussian noise to a clean 3D trajectory.
 
     Args:
-        clean_trajectory (torch.Tensor): The clean trajectory.
+        clean_trajectory (torch.Tensor): The clean trajectory with shape [seq_length, 3].
         noiseadding_steps (int): Number of steps to iteratively add noise.
 
     Returns:
-        torch.Tensor: Noisy trajectory.
+        torch.Tensor: Noisy trajectory with shape [seq_length, 3].
     """
     noisy_trajectory = clean_trajectory.clone()
     for _ in range(noiseadding_steps):
+        #print("clean trajectorie shape:", clean_trajectory.shape)
         noise = torch.randn_like(clean_trajectory) * 0.1  # Scale the noise
         noisy_trajectory += noise
     return noisy_trajectory
@@ -81,16 +84,16 @@ class ImpedanceDatasetInitial(Dataset):
             torch.tensor(sample["pos_0"], dtype=torch.float32),
         )
 
-# Dataset Class for diffusion-based training
+# Dataset Class for 3D Trajectories
 class ImpedanceDatasetDiffusion(Dataset):
     """
-    A dataset class for diffusion-based training.
+    A dataset class for 3D diffusion-based training.
 
     Args:
-        data (list): A list of dictionaries containing clean trajectories.
+        data (list): A list of dictionaries containing 3D clean trajectories.
 
     Returns:
-        torch.Tensor: Clean trajectory (pos_0).
+        torch.Tensor: Clean 3D trajectory (pos_0).
     """
     def __init__(self, data):
         self.data = data
@@ -100,15 +103,15 @@ class ImpedanceDatasetDiffusion(Dataset):
 
     def __getitem__(self, idx):
         sample = self.data[idx]
-        return torch.tensor(sample["pos_0"], dtype=torch.float32)
+        return torch.tensor(sample["pos_0"], dtype=torch.float32)  # Shape: [seq_length, 3]
 
-# Noise Predictor Model
 class NoisePredictor(nn.Module):
     """
-    A feedforward neural network to predict clean trajectories from noisy inputs.
+    A feedforward neural network to predict clean 3D trajectories from noisy inputs.
     """
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, seq_length, hidden_dim):
         super(NoisePredictor, self).__init__()
+        input_dim = seq_length * 3  # Flatten 3D data into 1D vector
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
@@ -117,22 +120,25 @@ class NoisePredictor(nn.Module):
 
     def forward(self, noisy_trajectory):
         """
-        Forward pass to predict clean trajectory.
+        Forward pass to predict clean 3D trajectory.
 
         Args:
-            noisy_trajectory (torch.Tensor): Input noisy trajectory.
+            noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
 
         Returns:
-            torch.Tensor: Predicted clean trajectory.
+            torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
         """
-        x = self.input_layer(noisy_trajectory)
+        batch_size, seq_length, _ = noisy_trajectory.shape
+        x = noisy_trajectory.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 3]
+        x = self.input_layer(x)
         x = self.relu(x)
         x = self.hidden_layer_1(x)
         x = self.relu(x)
         x = self.hidden_layer_2(x)
         x = self.relu(x)
         x = self.output_layer(x)
-        return x
+        #print("output shape:", x.view(batch_size, seq_length, 3).shape)
+        return x.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
 
 # Training Loop for Diffusion
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps):
@@ -157,7 +163,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         total_loss = 0
         for clean_trajectory in dataloader:
             clean_trajectory = clean_trajectory.to(device)
-
+            #print("clean_trajectory shape:", clean_trajectory.shape)
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
 
@@ -219,7 +225,8 @@ def main():
     Main function to execute the training and validation of the NoisePredictor model.
     """
     # Hyperparameters
-    input_dim = 100  # Sequence length
+    seq_length = 100
+    input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 64
     batch_size = 32
     num_epochs = 20
@@ -227,7 +234,7 @@ def main():
     noiseadding_steps = 5
 
     # Generate data
-    data = generate_data()
+    data = generate_data(num_samples=10000, seq_length=seq_length)
     split = int(len(data) * 0.8)
     train_data = data[:split]
     val_data = data[split:]
@@ -241,7 +248,7 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = NoisePredictor(input_dim, hidden_dim).to(device)
+    model = NoisePredictor(seq_length, hidden_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
@@ -261,22 +268,24 @@ def main():
 
     # Visualize predictions
     model.eval()
-    clean_trajectory = next(iter(val_loader)).to(device)
+    clean_trajectory = next(iter(val_loader)).to(device)  # Shape: [batch_size, seq_length, 3]
 
     with torch.no_grad():
         noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
         predicted_trajectory = model(noisy_trajectory)
 
-    # Plot a single sequence
+    # Plot predictions for all 3 dimensions
     plt.figure(figsize=(10, 5))
-    plt.plot(clean_trajectory[0].cpu().numpy(), label='Clean Trajectory')
-    plt.plot(noisy_trajectory[0].cpu().numpy(), label='Noisy Trajectory', linestyle='--')
-    plt.plot(predicted_trajectory[0].cpu().numpy(), label='Predicted Trajectory', linestyle='-.')
+    for i, label in enumerate(['x', 'y', 'z']):
+        plt.plot(clean_trajectory[0, :, i].cpu().numpy(), label=f'Clean {label}')
+        plt.plot(noisy_trajectory[0, :, i].cpu().numpy(), linestyle='--', label=f'Noisy {label}')
+        plt.plot(predicted_trajectory[0, :, i].cpu().numpy(), linestyle='-.', label=f'Predicted {label}')
     plt.xlabel('Time Step')
     plt.ylabel('Position')
-    plt.title('Trajectory Prediction')
+    plt.title('Trajectory Prediction (3D)')
     plt.legend()
     plt.show()
+
 
 if __name__ == "__main__":
     main()
