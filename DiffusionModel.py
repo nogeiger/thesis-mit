@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Data Generation
 def generate_data(num_samples=10000, seq_length=100):
@@ -77,6 +78,7 @@ class DiffusionModel(nn.Module):
 # Training Loop
 def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
     model.train()
+    epoch_losses = []
     for epoch in range(num_epochs):
         total_loss = 0
         for timestamps, noisy_pos, forces, clean_pos in dataloader:
@@ -89,7 +91,6 @@ def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
 
             optimizer.zero_grad()
 
-            #predicted_pos = model(noisy_pos, forces, timestamps)
             predicted_pos = model(noisy_pos)
             loss = criterion(predicted_pos, clean_pos)
             loss.backward()
@@ -97,7 +98,10 @@ def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
 
             total_loss += loss.item()
 
-        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(dataloader):.4f}")
+        avg_loss = total_loss / len(dataloader)
+        epoch_losses.append(avg_loss)
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+    return epoch_losses
 
 
 # Validation Loop
@@ -113,12 +117,13 @@ def validate_model(model, dataloader, criterion, device):
                 clean_pos.to(device),
             )
 
-            #predicted_pos = model(noisy_pos, forces, timestamps)
             predicted_pos = model(noisy_pos)
             loss = criterion(predicted_pos, clean_pos)
             total_loss += loss.item()
 
-    print(f"Validation Loss: {total_loss / len(dataloader):.4f}")
+    avg_loss = total_loss / len(dataloader)
+    print(f"Validation Loss: {avg_loss:.4f}")
+    return avg_loss
 
 # Main Execution
 def main():
@@ -127,7 +132,7 @@ def main():
     hidden_dim = 64
     output_dim = 100  # Clean trajectory output
     batch_size = 32
-    num_epochs = 2
+    num_epochs = 20
     learning_rate = 1e-3
 
     # Generate data
@@ -191,9 +196,42 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
-    # Train and validate
-    train_model(model, train_loader, optimizer, criterion, device, num_epochs)
-    validate_model(model, val_loader, criterion, device)
+     # Train and validate
+    train_losses = train_model(model, train_loader, optimizer, criterion, device, num_epochs)
+    val_loss = validate_model(model, val_loader, criterion, device)
+
+    # Plot training and validation loss
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
+    plt.axhline(val_loss, color='red', linestyle='--', label='Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.show()
+
+    # Visualize predictions
+    model.eval()
+    timestamps, noisy_pos, forces, clean_pos = next(iter(val_loader))
+    timestamps, noisy_pos, forces, clean_pos = (
+        timestamps.to(device),
+        noisy_pos.to(device),
+        forces.to(device),
+        clean_pos.to(device),
+    )
+
+    with torch.no_grad():
+        predicted_pos = model(noisy_pos)
+
+    # Plot a single sequence (e.g., the first one in the batch)
+    plt.figure(figsize=(10, 5))
+    plt.plot(clean_pos[0].cpu().numpy(), label='Real Trajectory')
+    plt.plot(predicted_pos[0].cpu().numpy(), label='Predicted Trajectory', linestyle='--')
+    plt.xlabel('Time Step')
+    plt.ylabel('Position')
+    plt.title('Real vs Predicted Trajectory')
+    plt.legend()
+    plt.show()
 
 if __name__ == "__main__":
     main()
