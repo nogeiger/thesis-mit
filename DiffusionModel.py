@@ -159,9 +159,9 @@ def load_robot_data(folder_path, seq_length):
                 # Extract clean trajectories for x, y, z and stack them
                 for i in range(0, len(df) - seq_length + 1, seq_length):
                     clean_trajectory = np.stack([
-                        df["Pos_x"].iloc[i:i + seq_length].values,
-                        df["Pos_y"].iloc[i:i + seq_length].values,
-                        df["Pos_z"].iloc[i:i + seq_length].values,
+                        df["Pos_0_x"].iloc[i:i + seq_length].values,
+                        df["Pos_0_y"].iloc[i:i + seq_length].values,
+                        df["Pos_0_z"].iloc[i:i + seq_length].values,
                     ], axis=-1)  # Shape: [seq_length, 3]
 
                     sample = {"pos_0": clean_trajectory}
@@ -183,7 +183,7 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
-def add_noise(clean_trajectory, noiseadding_steps, beta_start=0.0001, beta_end=0.02):
+def add_noise(clean_trajectory, max_noiseadding_steps, beta_start=0.0001, beta_end=0.02):
     """
     Dynamically adds Gaussian noise to a clean 3D trajectory based on a diffusion model schedule.
     Noise is progressively added over several steps according to a linear schedule.
@@ -197,6 +197,9 @@ def add_noise(clean_trajectory, noiseadding_steps, beta_start=0.0001, beta_end=0
     Returns:
         torch.Tensor: Noisy trajectory with shape [seq_length, 3].
     """
+    # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
+    noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()
+    
     noisy_trajectory = clean_trajectory.clone()
     
     # Linear schedule for noise scale (beta values)
@@ -282,7 +285,6 @@ class NoisePredictor(nn.Module):
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
-        self.hidden_layer_3 = nn.Linear(hidden_dim, hidden_dim)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
         self.relu = nn.ReLU()
 
@@ -303,8 +305,6 @@ class NoisePredictor(nn.Module):
         x = self.hidden_layer_1(x)
         x = self.relu(x)
         x = self.hidden_layer_2(x)
-        x = self.relu(x)
-        x = self.hidden_layer_3(x)
         x = self.relu(x)
         predicted_noise = self.output_layer(x)
         return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
