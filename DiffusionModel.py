@@ -9,23 +9,37 @@ import pandas as pd
 
 def compute_statistics_per_axis(data):
     """
-    Computes min and max for each axis (x, y, z) in the dataset for normalization.
+    Computes min and max for each axis (x, y, z) for both clean and noisy trajectories in the dataset.
 
     Args:
-        data (list): A list of dictionaries containing clean trajectories.
+        data (list): A list of dictionaries containing clean and noisy trajectories.
 
     Returns:
-        dict: A dictionary containing min and max for each axis (x, y, z).
+        dict: A dictionary containing min and max for each axis (x, y, z) for both clean and noisy trajectories.
     """
-    data_concat = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
-    min_vals = torch.tensor(data_concat.min(axis=0), dtype=torch.float32)  # Shape: [3]
-    max_vals = torch.tensor(data_concat.max(axis=0), dtype=torch.float32)  # Shape: [3]
+    # Concatenate both clean (pos_0) and noisy (pos) trajectories for each sample
+    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
+    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0)  # Shape: [total_points, 3]
 
-    # Prevent division by zero
+    # Calculate min and max values for both clean and noisy trajectories (separately)
+    min_vals_pos_0 = torch.tensor(pos_0_data.min(axis=0)[0], dtype=torch.float32)  # Min for clean (pos_0)
+    max_vals_pos_0 = torch.tensor(pos_0_data.max(axis=0)[0], dtype=torch.float32)  # Max for clean (pos_0)
+    
+    min_vals_pos = torch.tensor(pos_data.min(axis=0)[0], dtype=torch.float32)  # Min for noisy (pos)
+    max_vals_pos = torch.tensor(pos_data.max(axis=0)[0], dtype=torch.float32)  # Max for noisy (pos)
+
+    # Prevent division by zero for constant axes in both pos_0 and pos
     epsilon = 1e-8
-    max_vals = torch.where(max_vals == min_vals, max_vals + epsilon, max_vals)
-    return {"min": min_vals, "max": max_vals}
+    max_vals_pos_0 = torch.where(max_vals_pos_0 == min_vals_pos_0, max_vals_pos_0 + epsilon, max_vals_pos_0)
+    max_vals_pos = torch.where(max_vals_pos == min_vals_pos, max_vals_pos + epsilon, max_vals_pos)
 
+    # Return the min and max for both pos_0 (clean) and pos (noisy)
+    return {
+        "min_pos_0": min_vals_pos_0, 
+        "max_pos_0": max_vals_pos_0, 
+        "min_pos": min_vals_pos, 
+        "max_pos": max_vals_pos
+    }
 
 def normalize_data_per_axis(data, stats):
     """
@@ -164,7 +178,15 @@ def load_robot_data(folder_path, seq_length):
                         df["Pos_0_z"].iloc[i:i + seq_length].values,
                     ], axis=-1)  # Shape: [seq_length, 3]
 
-                    sample = {"pos_0": clean_trajectory}
+                    noisy_trajectory = np.stack([
+                        df["Pos_x"].iloc[i:i + seq_length].values,
+                        df["Pos_y"].iloc[i:i + seq_length].values,
+                        df["Pos_z"].iloc[i:i + seq_length].values,
+                    ], axis=-1)  # Shape: [seq_length, 3]
+
+                    sample = {"pos_0": clean_trajectory,
+                              "pos": noisy_trajectory,
+                              }
                     file_data.append(sample)
 
                 print(f"Loaded {len(file_data)} samples from {filename}, each with a sequence length of {seq_length} in 3D.")
@@ -401,10 +423,16 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
     print(f"Validation Loss: {avg_loss:.4f}")
     return avg_loss
 
+
+
+
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """
+
+    #TRAINING AND TESTING
+    ####################
     # Hyperparameters
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
@@ -419,13 +447,32 @@ def main():
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
+    # For example, iterate over data
+    for sample in data:
+        clean_trajectory = sample["pos_0"]
+        noisy_trajectory = sample["pos"]
+        print("Clean trajectory shape:", clean_trajectory.shape)
+        print("Noisy trajectory shape:", noisy_trajectory.shape)
+        break
+
     
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
+    print("Statistics:", stats)
+
+    #To do: 
+    # normalize data anpassen
+    #max noise als unterschied zwischen noisy und clean trajectory
+    #noise durch max step size aufteilen
+    #add noise anpassen
+    #force hinzufuegen
+
+
 
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
-    
+    print("Normalized data shape:", normalized_data.shape)
+    '''
     # Split into training and validation sets
     split = int(len(normalized_data) * 0.8)
     train_data = normalized_data[:split]
@@ -433,7 +480,7 @@ def main():
 
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
-    val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
+    val_dataset = ImpedanceDatasetDiffusion(train_data, stats)
 
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -475,6 +522,7 @@ def main():
         # Recover the predicted clean trajectory by subtracting predicted noise from noisy trajectory
         predicted_clean_trajectory = noisy_trajectory - predicted_noise
 
+
     # Denormalize for visualization
     clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu())
     noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu())
@@ -482,18 +530,6 @@ def main():
     predicted_noise = val_dataset.denormalize(predicted_noise.cpu())  # Denormalize the predicted noise
     predicted_clean_trajectory = val_dataset.denormalize(predicted_clean_trajectory.cpu())  # Denormalize predicted clean trajectory
 
-    # Plot predictions for the clean trajectories (x, y, z)
-    plt.figure(figsize=(10, 5))
-    for i, label in enumerate(['x', 'y', 'z']):
-        if i != 1:
-            continue
-        plt.plot(clean_trajectory[0, :, i], label=f'Ground Truth Clean {label}')
-        plt.plot(predicted_clean_trajectory[0, :, i], linestyle='-.', label=f'Predicted Clean {label}')
-    plt.xlabel('Time Step')
-    plt.ylabel('Position')
-    plt.title('Clean Trajectory Prediction')
-    plt.legend()
-    plt.show()
 
     # Plot predictions for the noise (x, y, z)
     plt.figure(figsize=(10, 5))
@@ -508,6 +544,42 @@ def main():
     plt.legend()
     plt.show()
     
+    # Inference: Iterative denoising
+    ###########################
+    # Start with a noisy trajectory and progressively denoise
+    denoised_trajectory = noisy_trajectory.clone()
 
+    # Number of denoising steps
+    num_denoising_steps = noiseadding_steps  # Typically, this should be the same as the number of noise steps used in training
+
+    for step in range(num_denoising_steps):
+        # Predict the noise at the current step
+        predicted_noise = model(denoised_trajectory)
+
+        # Subtract the predicted noise to denoise the trajectory
+        denoised_trajectory = denoised_trajectory - predicted_noise
+
+    # Detach and move the clean and denoised trajectories to CPU before plotting
+    clean_trajectory = clean_trajectory.detach().cpu().numpy()
+    denoised_trajectory = denoised_trajectory.detach().cpu().numpy()
+
+    # Plot the clean trajectory and denoised trajectory
+    plt.figure(figsize=(10, 5))
+    for i, label in enumerate(['x', 'y', 'z']):
+        if i != 1:  # Adjust this condition based on which axis you want to plot
+            continue
+
+        # Plot the ground truth clean trajectory
+        plt.plot(clean_trajectory[0, :, i], label=f'Ground Truth Clean {label}')
+        
+        # Plot the denoised trajectory
+        plt.plot(denoised_trajectory[0, :, i], linestyle='-.', label=f'Denoised {label}')
+        
+    plt.xlabel('Time Step')
+    plt.ylabel('Position')
+    plt.title('Clean and Denoised Trajectory Comparison')
+    plt.legend()
+    plt.show()
+    '''
 if __name__ == "__main__":
     main()
