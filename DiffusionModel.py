@@ -17,25 +17,15 @@ def compute_statistics_per_axis(data):
     Returns:
         dict: A dictionary containing min and max for each axis (x, y, z).
     """
-    # Concatenate clean trajectories (pos_0) and compute min/max
-    pos_0_concat = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
-    pos_0_min = torch.tensor(pos_0_concat.min(axis=0), dtype=torch.float32)  # Shape: [3]
-    pos_0_max = torch.tensor(pos_0_concat.max(axis=0), dtype=torch.float32)  # Shape: [3]
-
-    # Concatenate noisy trajectories (pos) and compute min/max
-    pos_concat = np.concatenate([sample["pos"] for sample in data], axis=0)  # Shape: [total_points, 3]
-    pos_min = torch.tensor(pos_concat.min(axis=0), dtype=torch.float32)  # Shape: [3]
-    pos_max = torch.tensor(pos_concat.max(axis=0), dtype=torch.float32)  # Shape: [3]
+    data_concat = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
+    min_vals = torch.tensor(data_concat.min(axis=0), dtype=torch.float32)  # Shape: [3]
+    max_vals = torch.tensor(data_concat.max(axis=0), dtype=torch.float32)  # Shape: [3]
 
     # Prevent division by zero
     epsilon = 1e-8
-    pos_0_max = torch.where(pos_0_max == pos_0_min, pos_0_max + epsilon, pos_0_max)
-    pos_max = torch.where(pos_max == pos_min, pos_max + epsilon, pos_max)
+    max_vals = torch.where(max_vals == min_vals, max_vals + epsilon, max_vals)
+    return {"min": min_vals, "max": max_vals}
 
-    return {
-        "pos_0": {"min": pos_0_min, "max": pos_0_max},
-        "pos": {"min": pos_min, "max": pos_max},
-    }
 
 def normalize_data_per_axis(data, stats):
     """
@@ -52,42 +42,26 @@ def normalize_data_per_axis(data, stats):
     normalized_data = []
     for sample in data:
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Shape: [seq_length, 3]
-        pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Shape: [seq_length, 3]
+        min_vals, max_vals = stats["min"], stats["max"]
 
-        # Normalize pos_0
-        min_vals_0, max_vals_0 = stats["pos_0"]["min"], stats["pos_0"]["max"]
-        range_vals_0 = max_vals_0 - min_vals_0
-        is_constant_0 = range_vals_0 == 0
-        range_vals_0 = torch.where(is_constant_0, torch.ones_like(range_vals_0), range_vals_0)
-        normalized_pos_0 = (pos_0 - min_vals_0) / range_vals_0
-
-        # Assign fixed normalized value for constant axes in pos_0
-        for axis in range(pos_0.shape[-1]):
-            if is_constant_0[axis]:
-                normalized_pos_0[:, axis] = 0.5
-
-        # Normalize pos
-        min_vals, max_vals = stats["pos"]["min"], stats["pos"]["max"]
+        # Handle constant axes
         range_vals = max_vals - min_vals
         is_constant = range_vals == 0
-        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
-        normalized_pos = (pos - min_vals) / range_vals
 
-        # Assign fixed normalized value for constant axes in pos
-        for axis in range(pos.shape[-1]):
+        # Avoid division by zero for non-constant axes
+        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
+        normalized_pos = (pos_0 - min_vals) / range_vals
+
+        # Assign fixed normalized value (e.g., 0.5) for constant axes
+        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
             if is_constant[axis]:
-                normalized_pos[:, axis] = 0.5
+                normalized_pos[:, axis] = 0.5  # Fixed normalized value for constant axes
 
         # Debugging: Check for anomalies
-        if torch.any(torch.isinf(normalized_pos_0)) or torch.any(torch.isnan(normalized_pos_0)):
-            print("Error: Found inf/nan in normalized_pos_0:", normalized_pos_0)
         if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
             print("Error: Found inf/nan in normalized_pos:", normalized_pos)
 
-        normalized_data.append({
-            "pos_0": normalized_pos_0,
-            "pos": normalized_pos,
-        })
+        normalized_data.append({"pos_0": normalized_pos})
 
     return normalized_data
 
@@ -190,15 +164,7 @@ def load_robot_data(folder_path, seq_length):
                         df["Pos_0_z"].iloc[i:i + seq_length].values,
                     ], axis=-1)  # Shape: [seq_length, 3]
 
-                    noisy_trajectory = np.stack([
-                        df["Pos_x"].iloc[i:i + seq_length].values,
-                        df["Pos_y"].iloc[i:i + seq_length].values,
-                        df["Pos_z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)  # Shape: [seq_length, 3]
-
-
-                    sample = {"pos_0": clean_trajectory,
-                              "pos" : noisy_trajectory,}
+                    sample = {"pos_0": clean_trajectory}
                     file_data.append(sample)
 
                 print(f"Loaded {len(file_data)} samples from {filename}, each with a sequence length of {seq_length} in 3D.")
@@ -225,23 +191,35 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
-# Add Noise Function for 3D Trajectories
-def add_noise(clean_trajectory, noiseadding_steps):
+def add_noise(clean_trajectory, noiseadding_steps, beta_start=0.0001, beta_end=0.02):
     """
-    Dynamically adds Gaussian noise to a clean 3D trajectory.
+    Dynamically adds Gaussian noise to a clean 3D trajectory based on a diffusion model schedule.
+    Noise is progressively added over several steps according to a linear schedule.
 
     Args:
         clean_trajectory (torch.Tensor): The clean trajectory with shape [seq_length, 3].
         noiseadding_steps (int): Number of steps to iteratively add noise.
+        beta_start (float): Initial value of noise scale.
+        beta_end (float): Final value of noise scale.
 
     Returns:
         torch.Tensor: Noisy trajectory with shape [seq_length, 3].
     """
     noisy_trajectory = clean_trajectory.clone()
-    for _ in range(noiseadding_steps):
-        noise = torch.randn_like(clean_trajectory) * 0.1  # Scale the noise
+    
+    # Linear schedule for noise scale (beta values)
+    beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced values between beta_start and beta_end
+    
+    for step in range(noiseadding_steps):
+        # Get current noise scale based on the diffusion schedule
+        beta = beta_values[step]  # Beta increases over time
+        
+        # Add Gaussian noise scaled by the current beta
+        noise = torch.randn_like(clean_trajectory) * torch.sqrt(beta)  # Apply sqrt(beta) for scaling the noise
         noisy_trajectory += noise
+    
     return noisy_trajectory
+
 
 # Dataset Class for initial model (not used in main)
 class ImpedanceDatasetInitial(Dataset):
@@ -435,20 +413,16 @@ def main():
     batch_size = 4
     num_epochs = 1000
     learning_rate = 1e-3
-    noiseadding_steps = 10
+    noiseadding_steps = 1000
 
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData/sin"
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
-    print(f"Total loaded noisy data shape: {len(data)} samples, each with shape {data[0]['pos'].shape}")
-    print(f"Total loaded clean data shape: {len(data)} samples, each with shape {data[0]['pos_0'].shape}")
-
     
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
-      
 
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
@@ -457,14 +431,6 @@ def main():
     split = int(len(normalized_data) * 0.8)
     train_data = normalized_data[:split]
     val_data = normalized_data[split:]
-    for i, sample in enumerate(train_data):
-        pos_0_shape = sample["pos_0"].shape
-        pos_shape = sample["pos"].shape
-        print(f"Sample {i}: pos_0 shape = {pos_0_shape}, pos shape = {pos_shape}")
-        break
-
-    
-    '''
 
     
     # Create datasets with per-axis normalization
@@ -512,6 +478,8 @@ def main():
     # Plot predictions for all 3 dimensions
     plt.figure(figsize=(10, 5))
     for i, label in enumerate(['x', 'y', 'z']):
+        if i != 1:
+            continue
         plt.plot(clean_trajectory[0, :, i], label=f'Clean {label}')
         plt.plot(noisy_trajectory[0, :, i], linestyle='--', label=f'Noisy {label}')
         plt.plot(predicted_trajectory[0, :, i], linestyle='-.', label=f'Predicted {label}')
@@ -521,6 +489,6 @@ def main():
     plt.legend()
     plt.show()
     
-    '''
+
 if __name__ == "__main__":
     main()
