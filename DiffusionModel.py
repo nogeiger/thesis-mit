@@ -159,9 +159,9 @@ def load_robot_data(folder_path, seq_length):
                 # Extract clean trajectories for x, y, z and stack them
                 for i in range(0, len(df) - seq_length + 1, seq_length):
                     clean_trajectory = np.stack([
-                        df["Pos_0_x"].iloc[i:i + seq_length].values,
-                        df["Pos_0_y"].iloc[i:i + seq_length].values,
-                        df["Pos_0_z"].iloc[i:i + seq_length].values,
+                        df["Pos_x"].iloc[i:i + seq_length].values,
+                        df["Pos_y"].iloc[i:i + seq_length].values,
+                        df["Pos_z"].iloc[i:i + seq_length].values,
                     ], axis=-1)  # Shape: [seq_length, 3]
 
                     sample = {"pos_0": clean_trajectory}
@@ -177,17 +177,9 @@ def load_robot_data(folder_path, seq_length):
     return all_data
 
 
-# Loss Function
 def loss_function(predicted_noise, actual_noise):
     """
     Computes the mean squared error between the predicted and actual noise.
-
-    Args:
-        predicted_noise (torch.Tensor): Predicted noise added to the trajectory.
-        actual_noise (torch.Tensor): Actual noise added to the trajectory.
-
-    Returns:
-        torch.Tensor: Mean squared error loss.
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
@@ -290,6 +282,7 @@ class NoisePredictor(nn.Module):
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_3 = nn.Linear(hidden_dim, hidden_dim)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
         self.relu = nn.ReLU()
 
@@ -311,9 +304,11 @@ class NoisePredictor(nn.Module):
         x = self.relu(x)
         x = self.hidden_layer_2(x)
         x = self.relu(x)
-        x = self.output_layer(x)
-        return x.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
-
+        x = self.hidden_layer_3(x)
+        x = self.relu(x)
+        predicted_noise = self.output_layer(x)
+        return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
+    
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
@@ -347,22 +342,24 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
             
+            # Compute the actual noise added
+            actual_noise = noisy_trajectory - clean_trajectory  # The difference between noisy and clean trajectory
+
             optimizer.zero_grad()
-            
-            # Predict the clean trajectory
-            predicted_trajectory = model(noisy_trajectory)
-            
-            # Calculate loss
-            loss = criterion(predicted_trajectory, clean_trajectory)
+
+            # Predict the noise from the noisy trajectory
+            predicted_noise = model(noisy_trajectory)
+
+            # Calculate loss between predicted noise and actual noise
+            loss = criterion(predicted_noise, actual_noise)
             loss.backward()
             optimizer.step()
-            
+
             total_loss += loss.item()
 
         avg_loss = total_loss / len(dataloader)
         epoch_losses.append(avg_loss)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
-        #print(f"Total batches processed in epoch {epoch + 1}: {batch_count}")
     
     return epoch_losses
 
@@ -387,15 +384,17 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
     with torch.no_grad():
         for clean_trajectory in dataloader:
             clean_trajectory = clean_trajectory.to(device)
-
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
 
-            # Predict the clean trajectory
-            predicted_trajectory = model(noisy_trajectory)
+            # Calculate the actual noise added
+            actual_noise = noisy_trajectory - clean_trajectory
 
-            # Calculate loss
-            loss = criterion(predicted_trajectory, clean_trajectory)
+            # Predict the noise from the noisy trajectory
+            predicted_noise = model(noisy_trajectory)
+
+            # Calculate loss between predicted noise and actual noise
+            loss = criterion(predicted_noise, actual_noise)
             total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)
@@ -406,10 +405,10 @@ def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """
-    # Hyperparametersprint
+    # Hyperparameters
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 64
+    hidden_dim = 128
     batch_size = 4
     num_epochs = 1000
     learning_rate = 1e-3
@@ -432,7 +431,6 @@ def main():
     train_data = normalized_data[:split]
     val_data = normalized_data[split:]
 
-    
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
@@ -441,7 +439,6 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NoisePredictor(seq_length, hidden_dim).to(device)
@@ -462,30 +459,52 @@ def main():
     plt.legend()
     plt.show()
 
-    # Visualize predictions
+    # Visualize predictions (Noise and Clean Trajectories)
     model.eval()
     clean_trajectory = next(iter(val_loader)).to(device)  # Shape: [batch_size, seq_length, 3]
 
     with torch.no_grad():
         noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
-        predicted_trajectory = model(noisy_trajectory)
+        
+        # Calculate the actual noise added to the clean trajectory
+        actual_noise = noisy_trajectory - clean_trajectory
+        
+        # Predict the noise from the noisy trajectory
+        predicted_noise = model(noisy_trajectory)
+        
+        # Recover the predicted clean trajectory by subtracting predicted noise from noisy trajectory
+        predicted_clean_trajectory = noisy_trajectory - predicted_noise
 
     # Denormalize for visualization
     clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu())
     noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu())
-    predicted_trajectory = val_dataset.denormalize(predicted_trajectory.cpu())
+    actual_noise = val_dataset.denormalize(actual_noise.cpu())  # Denormalize the actual noise
+    predicted_noise = val_dataset.denormalize(predicted_noise.cpu())  # Denormalize the predicted noise
+    predicted_clean_trajectory = val_dataset.denormalize(predicted_clean_trajectory.cpu())  # Denormalize predicted clean trajectory
 
-    # Plot predictions for all 3 dimensions
+    # Plot predictions for the clean trajectories (x, y, z)
     plt.figure(figsize=(10, 5))
     for i, label in enumerate(['x', 'y', 'z']):
         if i != 1:
             continue
-        plt.plot(clean_trajectory[0, :, i], label=f'Clean {label}')
-        plt.plot(noisy_trajectory[0, :, i], linestyle='--', label=f'Noisy {label}')
-        plt.plot(predicted_trajectory[0, :, i], linestyle='-.', label=f'Predicted {label}')
+        plt.plot(clean_trajectory[0, :, i], label=f'Ground Truth Clean {label}')
+        plt.plot(predicted_clean_trajectory[0, :, i], linestyle='-.', label=f'Predicted Clean {label}')
     plt.xlabel('Time Step')
     plt.ylabel('Position')
-    plt.title('Trajectory Prediction (3D)')
+    plt.title('Clean Trajectory Prediction')
+    plt.legend()
+    plt.show()
+
+    # Plot predictions for the noise (x, y, z)
+    plt.figure(figsize=(10, 5))
+    for i, label in enumerate(['x', 'y', 'z']):
+        if i != 1:
+            continue
+        plt.plot(actual_noise[0, :, i], label=f'Actual Noise {label}')
+        plt.plot(predicted_noise[0, :, i], linestyle='-.', label=f'Predicted Noise {label}')
+    plt.xlabel('Time Step')
+    plt.ylabel('Noise')
+    plt.title('Noise Prediction')
     plt.legend()
     plt.show()
     
