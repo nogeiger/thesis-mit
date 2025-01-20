@@ -20,49 +20,59 @@ def compute_statistics_per_axis(data):
     # Concatenate both clean (pos_0) and noisy (pos) trajectories for each sample
     pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
     pos_data = np.concatenate([sample["pos"] for sample in data], axis=0)  # Shape: [total_points, 3]
+    force_data = np.concatenate([sample["force"] for sample in data], axis=0)  # Shape: [total_points, 3]
 
     # Calculate min and max values for each axis (x, y, z) separately
     min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
     max_vals_pos_0 = torch.tensor(np.max(pos_0_data, axis=0), dtype=torch.float32)  # Max for clean (pos_0)
-    
+
     min_vals_pos = torch.tensor(np.min(pos_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
     max_vals_pos = torch.tensor(np.max(pos_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
+
+    min_vals_force = torch.tensor(np.min(force_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
+    max_vals_force = torch.tensor(np.max(force_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
 
     # Prevent division by zero for constant axes in both pos_0 and pos
     epsilon = 1e-8
     max_vals_pos_0 = torch.where(max_vals_pos_0 == min_vals_pos_0, max_vals_pos_0 + epsilon, max_vals_pos_0)
     max_vals_pos = torch.where(max_vals_pos == min_vals_pos, max_vals_pos + epsilon, max_vals_pos)
+    max_vals_force = torch.where(max_vals_force == min_vals_force, max_vals_force + epsilon, max_vals_force)
+
+
 
     # Return the min and max for both pos_0 (clean) and pos (noisy), per axis (x, y, z)
     return {
         "min_pos_0": min_vals_pos_0, 
         "max_pos_0": max_vals_pos_0, 
         "min_pos": min_vals_pos, 
-        "max_pos": max_vals_pos
+        "max_pos": max_vals_pos,
+        "min_force": min_vals_force,
+        "max_force": max_vals_force,
     }
 
 
 def normalize_data_per_axis(data, stats):
     """
-    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories.
-    Constant axes are assigned a fixed normalized value (e.g., 0.5).
-
+    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories, and also normalizes the forces.
+    
     Args:
-        data (list): A list of dictionaries containing clean and noisy trajectories.
-        stats (dict): Min and max values for normalization for both clean and noisy trajectories.
-
+        data (list): A list of dictionaries containing clean and noisy trajectories and forces.
+        stats (dict): Min and max values for normalization for both clean and noisy trajectories and forces.
+    
     Returns:
-        list: A list of dictionaries with normalized clean (pos_0) and noisy (pos) trajectories.
+        list: A list of dictionaries with normalized clean (pos_0), noisy (pos), and forces.
     """
     normalized_data = []
     
     for sample in data:
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
         pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
+        forces = torch.tensor(sample["force"], dtype=torch.float32)  # Forces [seq_length, 3]
 
-        # Retrieve min and max values for both clean and noisy trajectories
+        # Retrieve min and max values for both clean and noisy trajectories and forces
         min_vals_pos_0, max_vals_pos_0 = stats["min_pos_0"], stats["max_pos_0"]
         min_vals_pos, max_vals_pos = stats["min_pos"], stats["max_pos"]
+        min_vals_force, max_vals_force = stats["min_force"], stats["max_force"]
 
         # Normalize clean trajectory (pos_0)
         range_vals_pos_0 = max_vals_pos_0 - min_vals_pos_0
@@ -70,68 +80,44 @@ def normalize_data_per_axis(data, stats):
         range_vals_pos_0 = torch.where(is_constant_pos_0, torch.ones_like(range_vals_pos_0), range_vals_pos_0)
         normalized_pos_0 = (pos_0 - min_vals_pos_0) / range_vals_pos_0
 
-        # Assign fixed normalized value (e.g., 0.5) for constant axes in pos_0
-        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
-            if is_constant_pos_0[axis].item():  # Use .item() to access the value correctly
-                normalized_pos_0[:, axis] = 0.5  # Fixed normalized value for constant axes in pos_0
-
         # Normalize noisy trajectory (pos)
         range_vals_pos = max_vals_pos - min_vals_pos
         is_constant_pos = range_vals_pos == 0  # Check for constant value per axis
         range_vals_pos = torch.where(is_constant_pos, torch.ones_like(range_vals_pos), range_vals_pos)
         normalized_pos = (pos - min_vals_pos) / range_vals_pos
 
-        # Assign fixed normalized value (e.g., 0.5) for constant axes in pos
-        for axis in range(pos.shape[-1]):  # Iterate over x, y, z
-            if is_constant_pos[axis].item():  # Use .item() to access the value correctly
-                normalized_pos[:, axis] = 0.5  # Fixed normalized value for constant axes in pos
+        # Normalize forces
+        range_vals_force = max_vals_force - min_vals_force
+        is_constant_force = range_vals_force == 0  # Check for constant value per axis
+        range_vals_force = torch.where(is_constant_force, torch.ones_like(range_vals_force), range_vals_force)
+        normalized_force = (forces - min_vals_force) / range_vals_force
+
+        # Assign fixed normalized value (e.g., 0.5) for constant axes
+        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
+            if is_constant_pos_0[axis].item():
+                normalized_pos_0[:, axis] = 0.5
+            if is_constant_pos[axis].item():
+                normalized_pos[:, axis] = 0.5
+            if is_constant_force[axis].item():
+                normalized_force[:, axis] = 0.5
 
         # Debugging: Check for anomalies
         if torch.any(torch.isinf(normalized_pos_0)) or torch.any(torch.isnan(normalized_pos_0)):
             print("Error: Found inf/nan in normalized_pos_0:", normalized_pos_0)
         if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
             print("Error: Found inf/nan in normalized_pos:", normalized_pos)
+        if torch.any(torch.isinf(normalized_force)) or torch.any(torch.isnan(normalized_force)):
+            print("Error: Found inf/nan in normalized_force:", normalized_force)
 
-        # Append normalized data (both pos_0 and pos)
-        normalized_data.append({"pos_0": normalized_pos_0, "pos": normalized_pos})
+        # Append normalized data (both pos_0, pos, and force)
+        normalized_data.append({
+            "pos_0": normalized_pos_0,
+            "pos": normalized_pos,
+            "force": normalized_force
+        })
 
     return normalized_data
 
-
-
-
-def denormalize_data_with_constant_axes(normalized_data, stats):
-    """
-    Denormalizes each axis (x, y, z) in the data.
-    Constant axes are restored to their original constant values.
-
-    Args:
-        normalized_data (list): Normalized trajectory data.
-        stats (dict): Min and max values for denormalization.
-
-    Returns:
-        list: A list of dictionaries with denormalized trajectories.
-    """
-    denormalized_data = []
-    for sample in normalized_data:
-        pos_0 = sample["pos_0"]
-        min_vals, max_vals = stats["min"], stats["max"]
-
-        # Handle constant axes
-        range_vals = max_vals - min_vals
-        is_constant = range_vals == 0
-
-        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
-        denormalized_pos = pos_0 * range_vals + min_vals
-
-        # Restore original constant values
-        for axis in range(pos_0.shape[-1]):
-            if is_constant[axis]:
-                denormalized_pos[:, axis] = min_vals[axis]  # Restore original constant value
-
-        denormalized_data.append({"pos_0": denormalized_pos})
-
-    return denormalized_data
 
 
 # Data Generation for synthetic data
@@ -169,7 +155,7 @@ def load_robot_data(folder_path, seq_length):
         seq_length (int): Length of each trajectory segment.
 
     Returns:
-        list: A combined list of dictionaries, each containing 'pos_0' with shape [seq_length, 3].
+        list: A combined list of dictionaries, each containing 'pos_0' with shape [seq_length, 3] and 'force' with shape [seq_length, 3].
     """
     all_data = []
 
@@ -203,9 +189,18 @@ def load_robot_data(folder_path, seq_length):
                         df["Pos_z"].iloc[i:i + seq_length].values,
                     ], axis=-1)  # Shape: [seq_length, 3]
 
-                    sample = {"pos_0": clean_trajectory,
-                              "pos": noisy_trajectory,
-                              }
+                    # Extract forces
+                    forces = np.stack([
+                        df["Force_x"].iloc[i:i + seq_length].values,
+                        df["Force_y"].iloc[i:i + seq_length].values,
+                        df["Force_z"].iloc[i:i + seq_length].values,
+                    ], axis=-1)  # Shape: [seq_length, 3]
+
+                    sample = {
+                        "pos_0": clean_trajectory,
+                        "pos": noisy_trajectory,
+                        "force": forces  # Add forces to the sample
+                    }
                     file_data.append(sample)
 
                 print(f"Loaded {len(file_data)} samples from {filename}, each with a sequence length of {seq_length} in 3D.")
@@ -311,7 +306,8 @@ class ImpedanceDatasetDiffusion(Dataset):
         sample = self.data[idx]
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32) 
         pos = torch.tensor(sample["pos"], dtype=torch.float32) # Already normalized
-        return pos_0, pos
+        force = torch.tensor(sample["force"], dtype=torch.float32) # Already normalized
+        return pos_0, pos, force
 
     def denormalize(self, normalized_data, trajectory_type="pos_0"):
         """
@@ -343,29 +339,43 @@ class ImpedanceDatasetDiffusion(Dataset):
 
 class NoisePredictor(nn.Module):
     """
-    A feedforward neural network to predict clean 3D trajectories from noisy inputs.
+    A feedforward neural network to predict clean 3D trajectories from noisy inputs, 
+    including forces as extra features if the flag is set.
     """
-    def __init__(self, seq_length, hidden_dim):
+    def __init__(self, seq_length, hidden_dim, use_forces=False):
         super(NoisePredictor, self).__init__()
-        input_dim = seq_length * 3  # Flatten 3D data into 1D vector
+        self.use_forces = use_forces
+        input_dim = seq_length * 3  # Clean and noisy trajectories (pos_0 and pos)
+        
+        if self.use_forces:
+            input_dim += seq_length * 3  # Add forces (force_x, force_y, force_z)
+
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
-        self.output_layer = nn.Linear(hidden_dim, input_dim)
+        self.output_layer = nn.Linear(hidden_dim, seq_length * 3)  # Output clean trajectory (pos_0)
         self.relu = nn.ReLU()
 
-    def forward(self, noisy_trajectory):
+    def forward(self, noisy_trajectory, forces=None):
         """
         Forward pass to predict clean 3D trajectory.
 
         Args:
             noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
+            forces (torch.Tensor, optional): Input forces of shape [batch_size, seq_length, 3].
 
         Returns:
             torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
         """
         batch_size, seq_length, _ = noisy_trajectory.shape
-        x = noisy_trajectory.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 3]
+
+        # If using forces, concatenate them with noisy trajectory
+        if self.use_forces:
+            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Concatenate noisy trajectory and forces
+        else:
+            x = noisy_trajectory
+
+        x = x.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 6] if forces are included
         x = self.input_layer(x)
         x = self.relu(x)
         x = self.hidden_layer_1(x)
@@ -374,8 +384,10 @@ class NoisePredictor(nn.Module):
         x = self.relu(x)
         predicted_noise = self.output_layer(x)
         return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
-    
-def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps):
+
+
+
+def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, use_forces=False):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -387,6 +399,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         device (torch.device): Device for training (CPU or GPU).
         num_epochs (int): Number of training epochs.
         noiseadding_steps (int): Number of steps to add noise.
+        use_forces (bool): Whether to use forces as additional input to the model.
 
     Returns:
         list: List of average losses for each epoch.
@@ -399,12 +412,13 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         batch_count = 0  # To count the number of batches used in the epoch
         print(f"Starting epoch {epoch + 1}/{num_epochs}...")
 
-        for batch_idx, (pos_0,pos) in enumerate(dataloader):
+        for batch_idx, (pos_0, pos, force) in enumerate(dataloader):
             batch_count += 1
 
             # Move data to device
             clean_trajectory = pos_0.to(device)
             complete_noisy_trajectory = pos.to(device)
+            force = force.to(device)
 
             # Dynamically add noise based on the actual difference (using the diffusion schedule) 
             # between the clean trajectory and the complete noisy trajectory
@@ -415,8 +429,11 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
             optimizer.zero_grad()
 
-            # Predict the noise from the noisy trajectory
-            predicted_noise = model(noisy_trajectory)
+            # Predict the noise from the noisy trajectory (and forces if use_forces is True)
+            if use_forces:
+                predicted_noise = model(noisy_trajectory, force)
+            else:
+                predicted_noise = model(noisy_trajectory)
 
             # Calculate loss between predicted noise and actual noise
             loss = criterion(predicted_noise, actual_noise)
@@ -432,7 +449,8 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     return epoch_losses
 
 
-def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps):
+
+def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, use_forces=False):
     """
     Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
@@ -442,6 +460,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
         criterion (nn.Module): Loss function.
         device (torch.device): Device for validation (CPU or GPU).
         max_noiseadding_steps (int): Maximum number of steps to add noise.
+        use_forces (bool): Whether to use forces as additional input to the model.
 
     Returns:
         float: Average validation loss.
@@ -449,9 +468,10 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (pos_0, pos) in enumerate(dataloader):
+        for batch_idx, (pos_0, pos, force) in enumerate(dataloader):
             clean_trajectory = pos_0.to(device)
             noisy_trajectory = pos.to(device)
+            force = force.to(device)
 
             # Dynamically add noise based on the actual difference (using the diffusion schedule)
             noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps)
@@ -460,7 +480,10 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             actual_noise = noisy_trajectory - clean_trajectory
 
             # Predict the noise from the noisy trajectory
-            predicted_noise = model(noisy_trajectory)
+            if use_forces:
+                predicted_noise = model(noisy_trajectory, force)
+            else:
+                predicted_noise = model(noisy_trajectory)
 
             # Calculate loss between predicted noise and actual noise
             loss = criterion(predicted_noise, actual_noise)
@@ -477,13 +500,10 @@ def main():
     #To do: 
     #force hinzufuegen
 
-
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """
 
-    #TRAINING AND TESTING
-    ####################
     # Hyperparameters
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
@@ -492,6 +512,7 @@ def main():
     num_epochs = 1000
     learning_rate = 1e-3
     noiseadding_steps = 20
+    use_forces = True  # Set this to True if you want to use forces as input to the model
 
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData/sin"
@@ -504,8 +525,7 @@ def main():
 
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
-    #print("Normalized data shape:", normalized_data.shape)
-    
+
     # Split into training and validation sets
     split = int(len(normalized_data) * 0.8)
     train_data = normalized_data[:split]
@@ -521,13 +541,13 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = NoisePredictor(seq_length, hidden_dim).to(device)
+    model = NoisePredictor(seq_length, hidden_dim, use_forces=use_forces).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
     
     # Train and validate
-    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps)
-    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps)
+    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, use_forces)
+    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, use_forces)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
@@ -541,30 +561,26 @@ def main():
     
     # Visualize predictions (Noise and Clean Trajectories)
     model.eval()
-    clean_trajectory,noisy_trajectory = next(iter(val_loader))#.to(device)  # Shape: [batch_size, seq_length, 3]
+    clean_trajectory, noisy_trajectory, force = next(iter(val_loader))  # Get data from dataloader
     clean_trajectory = clean_trajectory.to(device)
     noisy_trajectory = noisy_trajectory.to(device)
+    force = force.to(device)
     
     with torch.no_grad():        
         # Calculate the actual noise added to the clean trajectory
         actual_noise = noisy_trajectory - clean_trajectory
         
         # Predict the noise from the noisy trajectory
-        predicted_noise = model(noisy_trajectory)
+        predicted_noise = model(noisy_trajectory, force) if use_forces else model(noisy_trajectory)
         
         # Recover the predicted clean trajectory by subtracting predicted noise from noisy trajectory
         predicted_clean_trajectory = noisy_trajectory - predicted_noise
 
-    
     # Denormalize for visualization
     clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu(), "pos_0")
-    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu(),"pos")
+    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu(), "pos")
     predicted_clean_trajectory = val_dataset.denormalize(predicted_clean_trajectory.cpu())  # Denormalize predicted clean trajectory
 
-    # Move to CPU for plotting
-    actual_noise = actual_noise.cpu()
-    predicted_noise = predicted_noise.cpu()
-    
     # Plot predictions for the noise (x, y, z)
     plt.figure(figsize=(10, 5))
     for i, label in enumerate(['x', 'y', 'z']):
@@ -588,7 +604,7 @@ def main():
 
     for step in range(num_denoising_steps):
         # Predict the noise at the current step
-        predicted_noise = model(denoised_trajectory)
+        predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
 
         # Subtract the predicted noise to denoise the trajectory
         denoised_trajectory = denoised_trajectory - predicted_noise
@@ -614,6 +630,6 @@ def main():
     plt.title('Clean and Denoised Trajectory Comparison')
     plt.legend()
     plt.show()
-    
+
 if __name__ == "__main__":
     main()
