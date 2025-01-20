@@ -224,37 +224,42 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
-def add_noise(clean_trajectory, max_noiseadding_steps, beta_start=0.0001, beta_end=0.02):
+def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start=0.0001, beta_end=0.02):
     """
-    Dynamically adds Gaussian noise to a clean 3D trajectory based on a diffusion model schedule.
-    Noise is progressively added over several steps according to a linear schedule.
+    Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
+    following a diffusion model schedule.
 
     Args:
         clean_trajectory (torch.Tensor): The clean trajectory with shape [seq_length, 3].
-        noiseadding_steps (int): Number of steps to iteratively add noise.
+        noisy_trajectory (torch.Tensor): The noisy trajectory with shape [seq_length, 3].
+        max_noiseadding_steps (int): Maximum number of steps to iteratively add noise.
         beta_start (float): Initial value of noise scale.
         beta_end (float): Final value of noise scale.
 
     Returns:
         torch.Tensor: Noisy trajectory with shape [seq_length, 3].
     """
+    # Calculate the actual noise (difference between clean and noisy)
+    actual_noise = noisy_trajectory - clean_trajectory
+
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
     noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()
-    
-    noisy_trajectory = clean_trajectory.clone()
-    
+
+    # Initialize the noisy trajectory as the clean trajectory
+    noisy_trajectory_output = clean_trajectory.clone()
+
     # Linear schedule for noise scale (beta values)
     beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced values between beta_start and beta_end
     
     for step in range(noiseadding_steps):
         # Get current noise scale based on the diffusion schedule
         beta = beta_values[step]  # Beta increases over time
-        
-        # Add Gaussian noise scaled by the current beta
-        noise = torch.randn_like(clean_trajectory) * torch.sqrt(beta)  # Apply sqrt(beta) for scaling the noise
-        noisy_trajectory += noise
+
+        # Scale the actual noise by sqrt(beta) and add it to the clean trajectory
+        noise_to_add = actual_noise * torch.sqrt(beta)
+        noisy_trajectory_output += noise_to_add
     
-    return noisy_trajectory
+    return noisy_trajectory_output
 
 
 # Dataset Class for initial model (not used in main)
@@ -286,7 +291,13 @@ class ImpedanceDatasetDiffusion(Dataset):
         data (list): A list of dictionaries containing 3D clean trajectories.
         stats (dict): A dictionary containing min and max for each axis (x, y, z).
 
-    Returns:
+    Returns:    # For example, iterate over data
+    for sample in data:
+        clean_trajectory = sample["pos_0"]
+        noisy_trajectory = sample["pos"]
+        print("Clean trajectory shape:", clean_trajectory.shape)
+        print("Noisy trajectory shape:", noisy_trajectory.shape)
+        break
         torch.Tensor: Normalized clean 3D trajectory (pos_0).
     """
     def __init__(self, data, stats=None):
@@ -390,16 +401,14 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
         for batch_idx, (pos_0,pos) in enumerate(dataloader):
             batch_count += 1
-            #print(f"Processing batch {batch_idx + 1}/{len(dataloader)}...")
-            #print("Shape of clean trajectory (pos_0):", pos_0.shape)
-            #print("Shape of noisy trajectory (pos):", pos.shape)
 
-
+            # Move data to device
             clean_trajectory = pos_0.to(device)
-            noisy_trajectory = pos.to(device)
-            
-            # Add noise to the clean trajectory
-            #noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
+            complete_noisy_trajectory = pos.to(device)
+
+            # Dynamically add noise based on the actual difference (using the diffusion schedule) 
+            # between the clean trajectory and the complete noisy trajectory
+            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, noiseadding_steps)
             
             # Compute the actual noise added
             actual_noise = noisy_trajectory - clean_trajectory  # The difference between noisy and clean trajectory
@@ -423,17 +432,16 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     return epoch_losses
 
 
-# Validation Loop for Diffusion
-def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_steps):
+def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps):
     """
-    Validates the NoisePredictor model on unseen data.
+    Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
     Args:
         model (nn.Module): The NoisePredictor model.
         dataloader (DataLoader): DataLoader for validation data.
         criterion (nn.Module): Loss function.
         device (torch.device): Device for validation (CPU or GPU).
-        noiseadding_steps (int): Number of steps to add noise.
+        max_noiseadding_steps (int): Maximum number of steps to add noise.
 
     Returns:
         float: Average validation loss.
@@ -441,15 +449,14 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (pos_0,pos) in enumerate(dataloader):
+        for batch_idx, (pos_0, pos) in enumerate(dataloader):
             clean_trajectory = pos_0.to(device)
             noisy_trajectory = pos.to(device)
-            
-            # Add noise to the clean trajectory
-            #noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
-            noisy_trajectory = pos
 
-            # Calculate the actus_constant_pos_0[axis]al noise added
+            # Dynamically add noise based on the actual difference (using the diffusion schedule)
+            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps)
+
+            # Calculate the actual noise added (difference between noisy and clean)
             actual_noise = noisy_trajectory - clean_trajectory
 
             # Predict the noise from the noisy trajectory
@@ -468,10 +475,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
 
 def main():
     #To do: 
-    #noise durch max step size aufteilen
-    #add noise anpassen
     #force hinzufuegen
-
 
 
     """
@@ -485,9 +489,9 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128
     batch_size = 4
-    num_epochs = 1
+    num_epochs = 1000
     learning_rate = 1e-3
-    noiseadding_steps = 1000
+    noiseadding_steps = 20
 
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData/sin"
@@ -509,7 +513,7 @@ def main():
 
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
-    val_dataset = ImpedanceDatasetDiffusion(train_data, stats)
+    val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
 
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
