@@ -21,19 +21,19 @@ def compute_statistics_per_axis(data):
     pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
     pos_data = np.concatenate([sample["pos"] for sample in data], axis=0)  # Shape: [total_points, 3]
 
-    # Calculate min and max values for both clean and noisy trajectories (separately)
-    min_vals_pos_0 = torch.tensor(pos_0_data.min(axis=0)[0], dtype=torch.float32)  # Min for clean (pos_0)
-    max_vals_pos_0 = torch.tensor(pos_0_data.max(axis=0)[0], dtype=torch.float32)  # Max for clean (pos_0)
+    # Calculate min and max values for each axis (x, y, z) separately
+    min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
+    max_vals_pos_0 = torch.tensor(np.max(pos_0_data, axis=0), dtype=torch.float32)  # Max for clean (pos_0)
     
-    min_vals_pos = torch.tensor(pos_data.min(axis=0)[0], dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_pos = torch.tensor(pos_data.max(axis=0)[0], dtype=torch.float32)  # Max for noisy (pos)
+    min_vals_pos = torch.tensor(np.min(pos_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
+    max_vals_pos = torch.tensor(np.max(pos_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
 
     # Prevent division by zero for constant axes in both pos_0 and pos
     epsilon = 1e-8
     max_vals_pos_0 = torch.where(max_vals_pos_0 == min_vals_pos_0, max_vals_pos_0 + epsilon, max_vals_pos_0)
     max_vals_pos = torch.where(max_vals_pos == min_vals_pos, max_vals_pos + epsilon, max_vals_pos)
 
-    # Return the min and max for both pos_0 (clean) and pos (noisy)
+    # Return the min and max for both pos_0 (clean) and pos (noisy), per axis (x, y, z)
     return {
         "min_pos_0": min_vals_pos_0, 
         "max_pos_0": max_vals_pos_0, 
@@ -41,7 +41,8 @@ def compute_statistics_per_axis(data):
         "max_pos": max_vals_pos
     }
 
-def normalize_data_per_axis(data, stats):
+
+def normalize_data_per_axis_old(data, stats):
     """
     Normalizes each axis (x, y, z) in the data.
     Constant axes are assigned a fixed normalized value (e.g., 0.5).
@@ -66,6 +67,7 @@ def normalize_data_per_axis(data, stats):
         range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
         normalized_pos = (pos_0 - min_vals) / range_vals
 
+        print("is constamt:",is_constant)
         # Assign fixed normalized value (e.g., 0.5) for constant axes
         for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
             if is_constant[axis]:
@@ -78,6 +80,62 @@ def normalize_data_per_axis(data, stats):
         normalized_data.append({"pos_0": normalized_pos})
 
     return normalized_data
+
+def normalize_data_per_axis(data, stats):
+    """
+    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories.
+    Constant axes are assigned a fixed normalized value (e.g., 0.5).
+
+    Args:
+        data (list): A list of dictionaries containing clean and noisy trajectories.
+        stats (dict): Min and max values for normalization for both clean and noisy trajectories.
+
+    Returns:
+        list: A list of dictionaries with normalized clean (pos_0) and noisy (pos) trajectories.
+    """
+    normalized_data = []
+    
+    for sample in data:
+        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
+        pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
+
+        # Retrieve min and max values for both clean and noisy trajectories
+        min_vals_pos_0, max_vals_pos_0 = stats["min_pos_0"], stats["max_pos_0"]
+        min_vals_pos, max_vals_pos = stats["min_pos"], stats["max_pos"]
+
+        # Normalize clean trajectory (pos_0)
+        range_vals_pos_0 = max_vals_pos_0 - min_vals_pos_0
+        is_constant_pos_0 = range_vals_pos_0 == 0  # Check for constant value per axis
+        range_vals_pos_0 = torch.where(is_constant_pos_0, torch.ones_like(range_vals_pos_0), range_vals_pos_0)
+        normalized_pos_0 = (pos_0 - min_vals_pos_0) / range_vals_pos_0
+
+        # Assign fixed normalized value (e.g., 0.5) for constant axes in pos_0
+        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
+            if is_constant_pos_0[axis].item():  # Use .item() to access the value correctly
+                normalized_pos_0[:, axis] = 0.5  # Fixed normalized value for constant axes in pos_0
+
+        # Normalize noisy trajectory (pos)
+        range_vals_pos = max_vals_pos - min_vals_pos
+        is_constant_pos = range_vals_pos == 0  # Check for constant value per axis
+        range_vals_pos = torch.where(is_constant_pos, torch.ones_like(range_vals_pos), range_vals_pos)
+        normalized_pos = (pos - min_vals_pos) / range_vals_pos
+
+        # Assign fixed normalized value (e.g., 0.5) for constant axes in pos
+        for axis in range(pos.shape[-1]):  # Iterate over x, y, z
+            if is_constant_pos[axis].item():  # Use .item() to access the value correctly
+                normalized_pos[:, axis] = 0.5  # Fixed normalized value for constant axes in pos
+
+        # Debugging: Check for anomalies
+        if torch.any(torch.isinf(normalized_pos_0)) or torch.any(torch.isnan(normalized_pos_0)):
+            print("Error: Found inf/nan in normalized_pos_0:", normalized_pos_0)
+        if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
+            print("Error: Found inf/nan in normalized_pos:", normalized_pos)
+
+        # Append normalized data (both pos_0 and pos)
+        normalized_data.append({"pos_0": normalized_pos_0, "pos": normalized_pos})
+
+    return normalized_data
+
 
 
 
@@ -409,7 +467,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
             # Add noise to the clean trajectory
             noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
 
-            # Calculate the actual noise added
+            # Calculate the actus_constant_pos_0[axis]al noise added
             actual_noise = noisy_trajectory - clean_trajectory
 
             # Predict the noise from the noisy trajectory
@@ -471,8 +529,8 @@ def main():
 
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
-    print("Normalized data shape:", normalized_data.shape)
-    '''
+    #print("Normalized data shape:", normalized_data.shape)
+    
     # Split into training and validation sets
     split = int(len(normalized_data) * 0.8)
     train_data = normalized_data[:split]
@@ -491,7 +549,8 @@ def main():
     model = NoisePredictor(seq_length, hidden_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
-
+    print("here")
+    '''
     # Train and validate
     train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps)
     val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps)
