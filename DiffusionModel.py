@@ -508,14 +508,15 @@ def main():
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128
-    batch_size = 4
-    num_epochs = 1000
+    batch_size = 32
+    num_epochs = 2000
     learning_rate = 1e-3
-    noiseadding_steps = 20
+    noiseadding_steps = 10
     use_forces = True  # Set this to True if you want to use forces as input to the model
 
     # File path to the real data
-    file_path = "Data/1D_diffusion/SimData/sin"
+    file_path = "Data/1D_diffusion/SimData"
+    #file_path = "Data/1D_diffusion/SimData/sin"
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
