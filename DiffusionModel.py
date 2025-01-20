@@ -42,45 +42,6 @@ def compute_statistics_per_axis(data):
     }
 
 
-def normalize_data_per_axis_old(data, stats):
-    """
-    Normalizes each axis (x, y, z) in the data.
-    Constant axes are assigned a fixed normalized value (e.g., 0.5).
-
-    Args:
-        data (list): A list of dictionaries containing clean trajectories.
-        stats (dict): Min and max values for normalization.
-
-    Returns:
-        list: A list of dictionaries with normalized trajectories.
-    """
-    normalized_data = []
-    for sample in data:
-        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Shape: [seq_length, 3]
-        min_vals, max_vals = stats["min"], stats["max"]
-
-        # Handle constant axes
-        range_vals = max_vals - min_vals
-        is_constant = range_vals == 0
-
-        # Avoid division by zero for non-constant axes
-        range_vals = torch.where(is_constant, torch.ones_like(range_vals), range_vals)
-        normalized_pos = (pos_0 - min_vals) / range_vals
-
-        print("is constamt:",is_constant)
-        # Assign fixed normalized value (e.g., 0.5) for constant axes
-        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
-            if is_constant[axis]:
-                normalized_pos[:, axis] = 0.5  # Fixed normalized value for constant axes
-
-        # Debugging: Check for anomalies
-        if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
-            print("Error: Found inf/nan in normalized_pos:", normalized_pos)
-
-        normalized_data.append({"pos_0": normalized_pos})
-
-    return normalized_data
-
 def normalize_data_per_axis(data, stats):
     """
     Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories.
@@ -337,23 +298,37 @@ class ImpedanceDatasetDiffusion(Dataset):
 
     def __getitem__(self, idx):
         sample = self.data[idx]
-        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Already normalized
-        return pos_0
+        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32) 
+        pos = torch.tensor(sample["pos"], dtype=torch.float32) # Already normalized
+        return pos_0, pos
 
-    def denormalize(self, normalized_data):
+    def denormalize(self, normalized_data, trajectory_type="pos_0"):
         """
         Denormalizes the given data using stored statistics for each axis.
 
         Args:
             normalized_data (torch.Tensor): Normalized data to be denormalized.
+            trajectory_type (str): Specifies whether to use 'pos_0' (clean) or 'pos' (noisy) statistics.
 
         Returns:
             torch.Tensor: Denormalized data.
         """
         if self.stats:
-            return normalized_data * (self.stats["max"] - self.stats["min"]) + self.stats["min"]
+            if trajectory_type == "pos_0":  # Use clean trajectory statistics
+                min_vals = self.stats["min_pos_0"]
+                max_vals = self.stats["max_pos_0"]
+            elif trajectory_type == "pos":  # Use noisy trajectory statistics
+                min_vals = self.stats["min_pos"]
+                max_vals = self.stats["max_pos"]
+            else:
+                raise ValueError("Invalid trajectory type. Must be 'pos_0' or 'pos'.")
+
+            # Denormalize using the corresponding min and max
+            denormalized_data = normalized_data * (max_vals - min_vals) + min_vals
+            return denormalized_data
         else:
             return normalized_data
+        
 
 class NoisePredictor(nn.Module):
     """
@@ -413,14 +388,18 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         batch_count = 0  # To count the number of batches used in the epoch
         print(f"Starting epoch {epoch + 1}/{num_epochs}...")
 
-        for batch_idx, clean_trajectory in enumerate(dataloader):
+        for batch_idx, (pos_0,pos) in enumerate(dataloader):
             batch_count += 1
             #print(f"Processing batch {batch_idx + 1}/{len(dataloader)}...")
-            
-            clean_trajectory = clean_trajectory.to(device)
+            #print("Shape of clean trajectory (pos_0):", pos_0.shape)
+            #print("Shape of noisy trajectory (pos):", pos.shape)
+
+
+            clean_trajectory = pos_0.to(device)
+            noisy_trajectory = pos.to(device)
             
             # Add noise to the clean trajectory
-            noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
+            #noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
             
             # Compute the actual noise added
             actual_noise = noisy_trajectory - clean_trajectory  # The difference between noisy and clean trajectory
@@ -462,10 +441,13 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for clean_trajectory in dataloader:
-            clean_trajectory = clean_trajectory.to(device)
+        for batch_idx, (pos_0,pos) in enumerate(dataloader):
+            clean_trajectory = pos_0.to(device)
+            noisy_trajectory = pos.to(device)
+            
             # Add noise to the clean trajectory
-            noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
+            #noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
+            noisy_trajectory = pos
 
             # Calculate the actus_constant_pos_0[axis]al noise added
             actual_noise = noisy_trajectory - clean_trajectory
@@ -485,6 +467,13 @@ def validate_model_diffusion(model, dataloader, criterion, device, noiseadding_s
 
 
 def main():
+    #To do: 
+    #noise durch max step size aufteilen
+    #add noise anpassen
+    #force hinzufuegen
+
+
+
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """
@@ -496,7 +485,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128
     batch_size = 4
-    num_epochs = 1000
+    num_epochs = 1
     learning_rate = 1e-3
     noiseadding_steps = 1000
 
@@ -505,27 +494,9 @@ def main():
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
-    # For example, iterate over data
-    for sample in data:
-        clean_trajectory = sample["pos_0"]
-        noisy_trajectory = sample["pos"]
-        print("Clean trajectory shape:", clean_trajectory.shape)
-        print("Noisy trajectory shape:", noisy_trajectory.shape)
-        break
-
     
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
-    print("Statistics:", stats)
-
-    #To do: 
-    # normalize data anpassen
-    #max noise als unterschied zwischen noisy und clean trajectory
-    #noise durch max step size aufteilen
-    #add noise anpassen
-    #force hinzufuegen
-
-
 
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
@@ -549,8 +520,7 @@ def main():
     model = NoisePredictor(seq_length, hidden_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
-    print("here")
-    '''
+    
     # Train and validate
     train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps)
     val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps)
@@ -564,14 +534,14 @@ def main():
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.show()
-
+    
     # Visualize predictions (Noise and Clean Trajectories)
     model.eval()
-    clean_trajectory = next(iter(val_loader)).to(device)  # Shape: [batch_size, seq_length, 3]
-
-    with torch.no_grad():
-        noisy_trajectory = add_noise(clean_trajectory, noiseadding_steps)
-        
+    clean_trajectory,noisy_trajectory = next(iter(val_loader))#.to(device)  # Shape: [batch_size, seq_length, 3]
+    clean_trajectory = clean_trajectory.to(device)
+    noisy_trajectory = noisy_trajectory.to(device)
+    
+    with torch.no_grad():        
         # Calculate the actual noise added to the clean trajectory
         actual_noise = noisy_trajectory - clean_trajectory
         
@@ -581,15 +551,16 @@ def main():
         # Recover the predicted clean trajectory by subtracting predicted noise from noisy trajectory
         predicted_clean_trajectory = noisy_trajectory - predicted_noise
 
-
+    
     # Denormalize for visualization
-    clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu())
-    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu())
-    actual_noise = val_dataset.denormalize(actual_noise.cpu())  # Denormalize the actual noise
-    predicted_noise = val_dataset.denormalize(predicted_noise.cpu())  # Denormalize the predicted noise
+    clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu(), "pos_0")
+    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu(),"pos")
     predicted_clean_trajectory = val_dataset.denormalize(predicted_clean_trajectory.cpu())  # Denormalize predicted clean trajectory
 
-
+    # Move to CPU for plotting
+    actual_noise = actual_noise.cpu()
+    predicted_noise = predicted_noise.cpu()
+    
     # Plot predictions for the noise (x, y, z)
     plt.figure(figsize=(10, 5))
     for i, label in enumerate(['x', 'y', 'z']):
@@ -639,6 +610,6 @@ def main():
     plt.title('Clean and Denoised Trajectory Comparison')
     plt.legend()
     plt.show()
-    '''
+    
 if __name__ == "__main__":
     main()
