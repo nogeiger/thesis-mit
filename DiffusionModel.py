@@ -219,7 +219,7 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
-def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start=0.0001, beta_end=0.02):
+def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start=0.8, beta_end=0.1):
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
     following a diffusion model schedule.
@@ -385,7 +385,33 @@ class NoisePredictor(nn.Module):
         predicted_noise = self.output_layer(x)
         return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
 
+class NoisePredictorLSTM(nn.Module):
+    def __init__(self, seq_length, hidden_dim, use_forces=False):
+        super(NoisePredictorLSTM, self).__init__()
+        self.use_forces = use_forces
+        input_dim = 3  # Each timestep has (x, y, z)
 
+        if self.use_forces:
+            input_dim += 3  # Add forces (force_x, force_y, force_z)
+
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True, num_layers=2)  # Two LSTM layers
+        self.fc = nn.Linear(hidden_dim, 3)  # Predict (x, y, z) noise for each timestep
+
+    def forward(self, noisy_trajectory, forces=None):
+        batch_size, seq_length, _ = noisy_trajectory.shape
+
+        if self.use_forces:
+            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Concatenate noisy trajectory and forces
+        else:
+            x = noisy_trajectory
+
+        # Pass through LSTM
+        lstm_out, _ = self.lstm(x)  # Shape: [batch_size, seq_length, hidden_dim]
+
+        # Predict noise for each timestep
+        predicted_noise = self.fc(lstm_out)  # Shape: [batch_size, seq_length, 3]
+
+        return predicted_noise
 
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, use_forces=False):
     """
@@ -509,9 +535,9 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128
     batch_size = 32
-    num_epochs = 2000
+    num_epochs = 5000 #2000
     learning_rate = 1e-3
-    noiseadding_steps = 10
+    noiseadding_steps = 2 #5
     use_forces = True  # Set this to True if you want to use forces as input to the model
 
     # File path to the real data
@@ -543,6 +569,9 @@ def main():
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NoisePredictor(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    
+    
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
     
