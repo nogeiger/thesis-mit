@@ -10,27 +10,30 @@ import pandas as pd
 from models import NoisePredictor, NoisePredictorLSTM
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion
-from utils import loss_function, add_noise
+from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
 
     
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
-    """
-
+    """ 
+    
     # Hyperparameters
     seq_length = 100
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128
     batch_size = 32
-    num_epochs = 5000 #2000
+    num_epochs = 100
     learning_rate = 1e-3
-    noiseadding_steps = 2 #5
+    noiseadding_steps = 20#2
     use_forces = True  # Set this to True if you want to use forces as input to the model
-
+    beta_start = 0.001
+    beta_end = 0.05
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData"
     #file_path = "Data/1D_diffusion/SimData/sin"
+
+    print(calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
@@ -58,14 +61,13 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NoisePredictor(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    
-    
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
-    
+    #criterion = nn.MSELoss()
+    criterion = loss_function_start_point
+
     # Train and validate
-    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, use_forces)
-    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, use_forces)
+    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces)
+    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, beta_start, beta_end, use_forces)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
@@ -91,13 +93,6 @@ def main():
         # Predict the noise from the noisy trajectory
         predicted_noise = model(noisy_trajectory, force) if use_forces else model(noisy_trajectory)
         
-        # Recover the predicted clean trajectory by subtracting predicted noise from noisy trajectory
-        predicted_clean_trajectory = noisy_trajectory - predicted_noise
-
-    # Denormalize for visualization
-    clean_trajectory = val_dataset.denormalize(clean_trajectory.cpu(), "pos_0")
-    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.cpu(), "pos")
-    predicted_clean_trajectory = val_dataset.denormalize(predicted_clean_trajectory.cpu())  # Denormalize predicted clean trajectory
 
     # Plot predictions for the noise (x, y, z)
     plt.figure(figsize=(10, 5))
@@ -115,21 +110,23 @@ def main():
     # Inference: Iterative denoising
     ###########################
     # Start with a noisy trajectory and progressively denoise
-    denoised_trajectory = noisy_trajectory.clone()
+    noise_trajectory = noisy_trajectory.clone()
 
     # Number of denoising steps
-    num_denoising_steps = noiseadding_steps  # Typically, this should be the same as the number of noise steps used in training
+    num_denoising_steps = noiseadding_steps  # this should be the same as the number of noise steps used in training
 
     for step in range(num_denoising_steps):
         # Predict the noise at the current step
-        predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
+        predicted_noise = model(noise_trajectory, force) if use_forces else model(denoised_trajectory)
 
         # Subtract the predicted noise to denoise the trajectory
-        denoised_trajectory = denoised_trajectory - predicted_noise
+        denoised_trajectory = noise_trajectory - predicted_noise
+
 
     # Detach and move the clean and denoised trajectories to CPU before plotting
-    clean_trajectory = clean_trajectory.detach().cpu().numpy()
-    denoised_trajectory = denoised_trajectory.detach().cpu().numpy()
+    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.detach().cpu(), "pos").numpy()
+    clean_trajectory = val_dataset.denormalize(clean_trajectory.detach().cpu(), "pos_0").numpy()
+    denoised_trajectory = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
 
     # Plot the clean trajectory and denoised trajectory
     plt.figure(figsize=(10, 5))
@@ -142,12 +139,13 @@ def main():
         
         # Plot the denoised trajectory
         plt.plot(denoised_trajectory[0, :, i], linestyle='-.', label=f'Denoised {label}')
+
         
     plt.xlabel('Time Step')
     plt.ylabel('Position')
     plt.title('Clean and Denoised Trajectory Comparison')
     plt.legend()
     plt.show()
-
+    
 if __name__ == "__main__":
     main()
