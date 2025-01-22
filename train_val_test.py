@@ -10,7 +10,7 @@ import pandas as pd
 from utils import loss_function, add_noise
 
 
-def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, use_forces=False):
+def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces=False):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -45,11 +45,11 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
             # Dynamically add noise based on the actual difference (using the diffusion schedule) 
             # between the clean trajectory and the complete noisy trajectory
-            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, noiseadding_steps)
+            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, noiseadding_steps, beta_start, beta_end)
             
             # Compute the actual noise added
             actual_noise = noisy_trajectory - clean_trajectory  # The difference between noisy and clean trajectory
-
+            #print(f"Actual noise at start: {actual_noise[:, 0, :]}")
             optimizer.zero_grad()
 
             # Predict the noise from the noisy trajectory (and forces if use_forces is True)
@@ -57,6 +57,9 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
                 predicted_noise = model(noisy_trajectory, force)
             else:
                 predicted_noise = model(noisy_trajectory)
+
+            #print(f"Predicted noise at start: {predicted_noise[:, 0, :]}")
+            #print(f"Actual noise at start: {actual_noise[:, 0, :]}")
 
             # Calculate loss between predicted noise and actual noise
             loss = criterion(predicted_noise, actual_noise)
@@ -73,7 +76,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
 
 
-def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, use_forces=False):
+def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, beta_start, beta_end, use_forces=False):
     """
     Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
@@ -97,7 +100,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             force = force.to(device)
 
             # Dynamically add noise based on the actual difference (using the diffusion schedule)
-            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps)
+            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps,beta_start, beta_end)
 
             # Calculate the actual noise added (difference between noisy and clean)
             actual_noise = noisy_trajectory - clean_trajectory
@@ -111,6 +114,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             # Calculate loss between predicted noise and actual noise
             loss = criterion(predicted_noise, actual_noise)
             total_loss += loss.item()
+
 
     avg_loss = total_loss / len(dataloader)
     print(f"Validation Loss: {avg_loss:.4f}")

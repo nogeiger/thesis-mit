@@ -14,6 +14,20 @@ def loss_function(predicted_noise, actual_noise):
     """
     return nn.MSELoss()(predicted_noise, actual_noise)
 
+def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=0):
+    """
+    Modified loss function to enforce alignment at the first timestep.
+    """
+    mse_loss = nn.MSELoss()(predicted_noise, actual_noise)
+    
+    # Add a penalty term for misalignment at the start point
+    start_point_loss = nn.MSELoss()(predicted_noise[:, 0, :], actual_noise[:, 0, :])
+    
+    # Combine losses (adjust weight of the penalty as needed, e.g., 0.1)
+    total_loss = mse_loss + weight_start_point * start_point_loss
+    return total_loss
+
+
 def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start=0.8, beta_end=0.1):
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
@@ -48,5 +62,29 @@ def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_st
         # Scale the actual noise by sqrt(beta) and add it to the clean trajectory
         noise_to_add = actual_noise * torch.sqrt(beta)
         noisy_trajectory_output += noise_to_add
+
     
     return noisy_trajectory_output
+
+
+def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):
+    """
+    Calculate the maximum factor of noise that can be added based on the noise schedule.
+
+    Args:
+        beta_start (float): Initial value of noise scale.
+        beta_end (float): Final value of noise scale.
+        max_noiseadding_steps (int): Maximum number of steps to iteratively add noise.
+
+    Returns:
+        float: The maximum noise factor that can be added.
+    """
+    import torch
+
+    # Linear schedule for beta values
+    beta_values = torch.linspace(beta_start, beta_end, max_noiseadding_steps)
+
+    # Compute the sum of sqrt(beta) for all steps
+    max_noise_factor = torch.sum(torch.sqrt(beta_values)).item()
+
+    return max_noise_factor

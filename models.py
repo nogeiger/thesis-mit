@@ -7,13 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-class NoisePredictor(nn.Module):
+class NoisePredictorInitial(nn.Module):
     """
     A feedforward neural network to predict clean 3D trajectories from noisy inputs, 
     including forces as extra features if the flag is set.
     """
     def __init__(self, seq_length, hidden_dim, use_forces=False):
-        super(NoisePredictor, self).__init__()
+        super(NoisePredictorInitial, self).__init__()
         self.use_forces = use_forces
         input_dim = seq_length * 3  # Clean and noisy trajectories (pos_0 and pos)
         
