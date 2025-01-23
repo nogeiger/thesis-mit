@@ -88,3 +88,5 @@ def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):
     max_noise_factor = torch.sum(torch.sqrt(beta_values)).item()
 
     return max_noise_factor
+
+
