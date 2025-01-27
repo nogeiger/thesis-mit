@@ -26,7 +26,8 @@ def main():
     num_epochs = 100
     learning_rate = 1e-3
     noiseadding_steps = 20#2
-    use_forces = True  # Set this to True if you want to use forces as input to the model
+    use_forces = False  # Set this to True if you want to use forces as input to the model
+    noise_with_force = True # Set this to True if you want to use forces as the noise
     beta_start = 0.001
     beta_end = 0.05
     # File path to the real data
@@ -66,8 +67,8 @@ def main():
     criterion = loss_function_start_point
 
     # Train and validate
-    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces)
-    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, beta_start, beta_end, use_forces)
+    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces,noise_with_force)
+    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, beta_start, beta_end, use_forces, noise_with_force)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
@@ -117,7 +118,7 @@ def main():
 
     for step in range(num_denoising_steps):
         # Predict the noise at the current step
-        predicted_noise = model(noise_trajectory, force) if use_forces else model(denoised_trajectory)
+        predicted_noise = model(noise_trajectory, force) if use_forces else model(noise_trajectory)
 
         # Subtract the predicted noise to denoise the trajectory
         denoised_trajectory = noise_trajectory - predicted_noise

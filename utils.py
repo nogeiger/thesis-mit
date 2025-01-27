@@ -27,8 +27,8 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     total_loss = mse_loss + weight_start_point * start_point_loss
     return total_loss
 
+def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, beta_start=0.8, beta_end=0.1, noise_with_force=False):
 
-def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start=0.8, beta_end=0.1):
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
     following a diffusion model schedule.
@@ -43,8 +43,12 @@ def add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_st
     Returns:
         torch.Tensor: Noisy trajectory with shape [seq_length, 3].
     """
-    # Calculate the actual noise (difference between clean and noisy)
-    actual_noise = noisy_trajectory - clean_trajectory
+    # Calculate the actual noise (difference between clean and noisy) - if scale_noise_with_force is True, use force as the noise
+    if noise_with_force:
+        actual_noise = force
+    # otherwise use difference between clean and noisy trajectory
+    else:
+        actual_noise = noisy_trajectory - clean_trajectory
 
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
     noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()

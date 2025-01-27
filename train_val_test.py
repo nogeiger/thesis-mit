@@ -11,7 +11,7 @@ from tqdm import tqdm
 from utils import loss_function, add_noise
 
 
-def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces=False):
+def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces=False, noise_with_force=False):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -43,10 +43,14 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, noiseadding_steps, beta_start, beta_end)
+            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, beta_end, noise_with_force=False)
             
-            # Compute the actual noise added
-            actual_noise = noisy_trajectory - clean_trajectory
+            # Compute the max noise (actual noise) based on the flag
+            if noise_with_force:
+                actual_noise = force  # Use force as the max noise
+                use_forces = False #then force should not be used as input
+            else:
+                actual_noise = noisy_trajectory - clean_trajectory  # Default noise
 
             optimizer.zero_grad()
 
@@ -70,7 +74,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     return epoch_losses
 
 
-def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, beta_start, beta_end, use_forces=False):
+def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, beta_start, beta_end, use_forces=False, noise_with_force=False):
     """
     Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
@@ -96,10 +100,15 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start, beta_end)
+            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, beta_start, beta_end, noise_with_force=False)
 
-            # Calculate the actual noise added
-            actual_noise = noisy_trajectory - clean_trajectory
+            # Compute the max noise (actual noise) based on the flag
+            if noise_with_force:
+                actual_noise = force  # Use force as the max noise
+                use_forces = False #then force should not be used as input
+            else:
+                actual_noise = noisy_trajectory - clean_trajectory  # Default: noise is the diff
+
 
             # Predict the noise from the noisy trajectory
             if use_forces:
