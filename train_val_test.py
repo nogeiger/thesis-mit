@@ -6,6 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from tqdm import tqdm
 
 from utils import loss_function, add_noise
 
@@ -32,36 +33,30 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
     for epoch in range(num_epochs):
         total_loss = 0
-        batch_count = 0  # To count the number of batches used in the epoch
         print(f"Starting epoch {epoch + 1}/{num_epochs}...")
 
-        for batch_idx, (pos_0, pos, force) in enumerate(dataloader):
-            batch_count += 1
-
+        # Use tqdm to create a progress bar
+        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             # Move data to device
             clean_trajectory = pos_0.to(device)
             complete_noisy_trajectory = pos.to(device)
             force = force.to(device)
 
-            # Dynamically add noise based on the actual difference (using the diffusion schedule) 
-            # between the clean trajectory and the complete noisy trajectory
+            # Dynamically add noise
             noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, noiseadding_steps, beta_start, beta_end)
             
             # Compute the actual noise added
-            actual_noise = noisy_trajectory - clean_trajectory  # The difference between noisy and clean trajectory
-            #print(f"Actual noise at start: {actual_noise[:, 0, :]}")
+            actual_noise = noisy_trajectory - clean_trajectory
+
             optimizer.zero_grad()
 
-            # Predict the noise from the noisy trajectory (and forces if use_forces is True)
+            # Predict the noise from the noisy trajectory
             if use_forces:
                 predicted_noise = model(noisy_trajectory, force)
             else:
                 predicted_noise = model(noisy_trajectory)
 
-            #print(f"Predicted noise at start: {predicted_noise[:, 0, :]}")
-            #print(f"Actual noise at start: {actual_noise[:, 0, :]}")
-
-            # Calculate loss between predicted noise and actual noise
+            # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
             loss.backward()
             optimizer.step()
@@ -73,7 +68,6 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
     
     return epoch_losses
-
 
 
 def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, beta_start, beta_end, use_forces=False):
@@ -93,16 +87,18 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
     """
     model.eval()
     total_loss = 0
+
+    # Use tqdm to create a progress bar
     with torch.no_grad():
-        for batch_idx, (pos_0, pos, force) in enumerate(dataloader):
+        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
             clean_trajectory = pos_0.to(device)
             noisy_trajectory = pos.to(device)
             force = force.to(device)
 
-            # Dynamically add noise based on the actual difference (using the diffusion schedule)
-            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps,beta_start, beta_end)
+            # Dynamically add noise
+            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, max_noiseadding_steps, beta_start, beta_end)
 
-            # Calculate the actual noise added (difference between noisy and clean)
+            # Calculate the actual noise added
             actual_noise = noisy_trajectory - clean_trajectory
 
             # Predict the noise from the noisy trajectory
@@ -111,10 +107,9 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             else:
                 predicted_noise = model(noisy_trajectory)
 
-            # Calculate loss between predicted noise and actual noise
+            # Calculate loss
             loss = criterion(predicted_noise, actual_noise)
             total_loss += loss.item()
-
 
     avg_loss = total_loss / len(dataloader)
     print(f"Validation Loss: {avg_loss:.4f}")

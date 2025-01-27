@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from models import NoisePredictor, NoisePredictorLSTM
+from models import NoisePredictorInitial, NoisePredictorLSTM
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
@@ -59,7 +59,7 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = NoisePredictor(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
@@ -99,8 +99,8 @@ def main():
     for i, label in enumerate(['x', 'y', 'z']):
         if i != 1:
             continue
-        plt.plot(actual_noise[0, :, i], label=f'Actual Noise {label}')
-        plt.plot(predicted_noise[0, :, i], linestyle='-.', label=f'Predicted Noise {label}')
+        plt.plot(actual_noise.detach().cpu()[0, :, i], label=f'Actual Noise {label}')
+        plt.plot(predicted_noise.detach().cpu()[0, :, i], linestyle='-.', label=f'Predicted Noise {label}')
     plt.xlabel('Time Step')
     plt.ylabel('Noise')
     plt.title('Noise Prediction')
