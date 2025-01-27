@@ -27,7 +27,8 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     total_loss = mse_loss + weight_start_point * start_point_loss
     return total_loss
 
-def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, beta_start=0.8, beta_end=0.1, noise_with_force=False):
+def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
+              beta_start=0.8, beta_end=0.1, noise_with_force=False):
 
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,

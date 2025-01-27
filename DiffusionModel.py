@@ -73,8 +73,30 @@ def main():
     criterion = loss_function_start_point
 
     # Train and validate
-    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces,noise_with_force, max_grad_norm)
-    val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, beta_start, beta_end, use_forces, noise_with_force)
+    train_losses = train_model_diffusion(
+        model,
+        train_loader, 
+        optimizer, 
+        criterion, 
+        device, 
+        num_epochs, 
+        noiseadding_steps, 
+        beta_start, 
+        beta_end, 
+        use_forces,
+        noise_with_force, 
+        max_grad_norm)
+    
+    val_loss = validate_model_diffusion(
+        model, 
+        val_loader,
+        criterion, 
+        device, 
+        noiseadding_steps, 
+        beta_start, 
+        beta_end, 
+        use_forces, 
+        noise_with_force)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
@@ -154,5 +176,6 @@ def main():
     plt.legend()
     plt.show()
     
+
 if __name__ == "__main__":
     main()
