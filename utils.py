@@ -28,7 +28,7 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     return total_loss
 
 def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
-              beta_start=0.8, beta_end=0.1, noise_with_force=False):
+              beta_start=0.8, beta_end=0.1, noise_with_force=False, add_gaussian_noise=False):
 
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
@@ -50,6 +50,22 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     # otherwise use difference between clean and noisy trajectory
     else:
         actual_noise = noisy_trajectory - clean_trajectory
+
+    # Optionally add Gaussian noise to the actual noise
+    if add_gaussian_noise:
+        # Generate Gaussian noise
+        gaussian_noise = torch.randn_like(actual_noise)
+        
+        # Normalize the Gaussian noise to have unit norm
+        norm = torch.norm(gaussian_noise)
+        if norm > 0:  # Avoid division by zero
+            gaussian_noise = gaussian_noise / norm
+        
+        #scale the normalized noise (to match force/trajectorz noise scale / to not have noise from gaussian which is way higher then the actual noise)
+        gaussian_noise = gaussian_noise * torch.norm(actual_noise)  # Scale to match actual_noise norm
+        
+        # Add the normalized Gaussian noise to the actual noise
+        actual_noise += gaussian_noise
 
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
     noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()

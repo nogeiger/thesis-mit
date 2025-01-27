@@ -27,10 +27,11 @@ def main():
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
-    noise_with_force = False # Set this to True if you want to use forces as the noise
+    noise_with_force = True # Set this to True if you want to use forces as the noise
     beta_start = 0.001 #for the noise diffusion model
     beta_end = 0.05 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
+    add_gaussian_noise = True # to add additional guassian noise
 
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData"
@@ -85,7 +86,8 @@ def main():
         beta_end, 
         use_forces,
         noise_with_force, 
-        max_grad_norm)
+        max_grad_norm,
+        add_gaussian_noise)
     
     val_loss = validate_model_diffusion(
         model, 
@@ -96,7 +98,8 @@ def main():
         beta_start, 
         beta_end, 
         use_forces, 
-        noise_with_force)
+        noise_with_force,
+        add_gaussian_noise)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))

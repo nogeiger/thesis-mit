@@ -12,7 +12,7 @@ from utils import loss_function, add_noise
 
 
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
-                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0):
+                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -46,7 +46,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
             # Dynamically add noise
             noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
-                                         beta_end, noise_with_force=False)
+                                         beta_end, noise_with_force, add_gaussian_noise)
             
             # Compute the max noise (actual noise) based on the flag
             if noise_with_force:
@@ -82,7 +82,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
 
 def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, 
-                             beta_start, beta_end, use_forces=False, noise_with_force=False):
+                             beta_start, beta_end, use_forces=False, noise_with_force=False, add_gaussian_noise=False):
     """
     Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
@@ -109,7 +109,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
             # Dynamically add noise
             noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
-                                         beta_start, beta_end, noise_with_force=False)
+                                         beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
             # Compute the max noise (actual noise) based on the flag
             if noise_with_force:
