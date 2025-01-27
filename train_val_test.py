@@ -11,7 +11,7 @@ from tqdm import tqdm
 from utils import loss_function, add_noise
 
 
-def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces=False, noise_with_force=False):
+def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -37,6 +37,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
         # Use tqdm to create a progress bar
         for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
+            
             # Move data to device
             clean_trajectory = pos_0.to(device)
             complete_noisy_trajectory = pos.to(device)
@@ -63,6 +64,10 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
             # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
             loss.backward()
+
+            # Apply gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+
             optimizer.step()
 
             total_loss += loss.item()

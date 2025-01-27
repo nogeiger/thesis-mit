@@ -19,20 +19,26 @@ def main():
     """ 
     
     # Hyperparameters
-    seq_length = 100
+    seq_length = 100 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 128
-    batch_size = 32
-    num_epochs = 100
-    learning_rate = 1e-3
-    noiseadding_steps = 20#2
-    use_forces = False  # Set this to True if you want to use forces as input to the model
-    noise_with_force = True # Set this to True if you want to use forces as the noise
-    beta_start = 0.001
-    beta_end = 0.05
+    hidden_dim = 128 #hidden dim of the model
+    batch_size = 32 #batch size
+    num_epochs = 100 #number of epochs
+    learning_rate = 1e-3 #learning rate
+    noiseadding_steps = 20 # Number of steps to add noise
+    use_forces = True  # Set this to True if you want to use forces as input to the model
+    noise_with_force = False # Set this to True if you want to use forces as the noise
+    beta_start = 0.001 #for the noise diffusion model
+    beta_end = 0.05 #for the noise diffusion model
+    max_grad_norm=7.0 #max grad norm for gradient clipping 
+
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData"
-    #file_path = "Data/1D_diffusion/SimData/sin"
+ 
+
+    #if force is used as noise, then force should not be used as input
+    if noise_with_force:
+            use_forces = False
 
     print(calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
 
@@ -67,7 +73,7 @@ def main():
     criterion = loss_function_start_point
 
     # Train and validate
-    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces,noise_with_force)
+    train_losses = train_model_diffusion(model, train_loader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, beta_end, use_forces,noise_with_force, max_grad_norm)
     val_loss = validate_model_diffusion(model, val_loader, criterion, device, noiseadding_steps, beta_start, beta_end, use_forces, noise_with_force)
     
     # Plot training and validation loss
