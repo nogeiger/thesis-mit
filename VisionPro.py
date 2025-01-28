@@ -1,7 +1,7 @@
 import time
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.31.190.119"  # Replace with your actual IP
+avp_ip = "10.29.180.3"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 # Open a text file for writing
@@ -27,7 +27,7 @@ with open('streamed_data.txt', 'w') as f:
 
                 # Flush to ensure data is written immediately
                 f.flush()
-
+                print(r['right_wrist'])
                 # Update the next timestep
                 next_timestep += timestep
 
