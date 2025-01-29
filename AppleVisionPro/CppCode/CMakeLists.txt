@@ -16,10 +16,10 @@ find_package(Qt5 REQUIRED COMPONENTS Core Concurrent)
 # Include directories
 set(includeDir
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/Explicit-cpp/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/myFRIClient/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/Explicit-cpp/Eigen
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/FTSensor/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Desktop/Explicit-FRI/Libraries/Explicit-cpp/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Desktop/Explicit-FRI/Libraries/myFRIClient/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Desktop/Explicit-FRI/Libraries/Explicit-cpp/Eigen
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Desktop/Explicit-FRI/Libraries/FTSensor/include
   ${Python3_INCLUDE_DIRS} # Include Python headers dynamically
   /home/newman_lab/.local/lib/python3.10/site-packages/pybind11/include # Add Pybind11 here
 )

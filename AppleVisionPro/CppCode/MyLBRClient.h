@@ -32,7 +32,6 @@ or in part in any way - electronic, mechanical, photocopying, recording,
 or otherwise, without the prior written consent of KUKA Roboter GmbH.
 
 
-
 \file
 \version {1.9}
 */
@@ -54,6 +53,7 @@ or otherwise, without the prior written consent of KUKA Roboter GmbH.
 namespace py = pybind11;
 
 using namespace KUKA::FRI;
+
 /**
  * \brief Template client implementation.
  */
@@ -83,14 +83,14 @@ public:
     /**
     * \brief Callback for the FRI session states 'Monitoring Wait' and 'Monitoring Ready'.
     *
-    * If you do not want to change the default-behavior, you do not have to implement this method.
+    * If you do not want to change the default behavior, you do not have to implement this method.
     */
     virtual void monitor();
 
     /**
     * \brief Callback for the FRI session state 'Commanding Wait'.
     *
-    * If you do not want to change the default-behavior, you do not have to implement this method.
+    * If you do not want to change the default behavior, you do not have to implement this method.
     */
     virtual void waitForCommand();
 
@@ -98,7 +98,7 @@ public:
     /**
     * \brief Callback for the FRI state 'Commanding Active'.
     *
-    * If you do not want to change the default-behavior, you do not have to implement this method.
+    * If you do not want to change the default behavior, you do not have to implement this method.
     */
     virtual void command();
 
@@ -109,113 +109,71 @@ private:
     py::scoped_interpreter guard;
 
     // Shared Memory and Threading
-    boost::thread streamerThread;
     boost::mutex dataMutex;
-
+    
+    // Function for streaming data in a separate thread
     void runStreamerThread();
+    
+    // Function to start the Python script for external processing
     void startPythonScript();
 
+    // Pointer to shared memory matrix
     double* matrix;
 
-    // Create iiwa as child of primitive class
+    // Robot Model
     iiwa14 *myLBR;
 
-    // Double values to get measured robot values and command robot values
-    double torques[7];
-    double qInitial[7];
-    double xInitial[7];
-    double qApplied[7];
-    double qCurr[7];
-    double qOld[7];
-    double q_arr[7];
-    double dq_arr[7];
-    double tauExternal[7];
-
+    // Joint-related variables (position, velocity, torques)
+    double torques[7];     // Torque values for each joint
+    double qInitial[7];    // Initial joint positions
+    double qApplied[7];    // Commanded joint positions
+    double qCurr[7];       // Current measured joint positions
+    double qOld[7];        // Previous joint positions
+    double tauExternal[7]; // External torques on each joint
 
     // Time parameters for control loop
     double sampleTime;
     double currentTime;
     double t_pressed;
 
-    int N_data;
-    int N_curr;
-    int n_step;
-
-    Eigen::MatrixXd q_data;
-    Eigen::MatrixXd dx_data;
-    Eigen::VectorXd q_init0;
-    Eigen::VectorXd q_init1;
-
-    bool is_pressed;
-
-
-    // Choose the body you want to control and the position on this body
+    // Chosen control point on the robot
     signed int bodyIndex;
     Eigen::Vector3d pointPosition;
 
-    // Current position and velocity as Eigen vector
-    Eigen::VectorXd q;
-    Eigen::VectorXd dq;
-    Eigen::VectorXd dq_0;
-    Eigen::VectorXd tauExt;
+    // Joint state variables
+    Eigen::VectorXd q;   // Current joint positions
+    Eigen::VectorXd dq;  // Joint velocities
 
     // Command torque vectors (with and without constraints)
     Eigen::VectorXd tau_motion;
     Eigen::VectorXd tau_previous;
     Eigen::VectorXd tau_prev_prev;
     Eigen::VectorXd tau_total;
-    Eigen::VectorXd tauExt_previous;
-    Eigen::VectorXd tauExt_prev_prev;
-    Eigen::VectorXd tauExt_filtered;
 
     // DECLARE VARIABLES FOR YOUR CONTROLLER HERE!!!
-    Eigen::MatrixXd M;
-    Eigen::MatrixXd M_inv;
-    Eigen::MatrixXd H;
-    Eigen::MatrixXd R;
-    Eigen::Matrix3d R_z;
-    Eigen::Matrix3d R_ee_i;
-    Eigen::MatrixXd J;
-    Eigen::MatrixXd J_inv;
-    
-    Eigen::MatrixXd H_rw_ini;
-    Eigen::MatrixXd p_rw_ini;
-    Eigen::MatrixXd H_ini;
-    Eigen::MatrixXd R_ini;
-    Eigen::VectorXd p_ini;
-    Eigen::VectorXd p;
-    Eigen::VectorXd p_0_ini;
-    Eigen::VectorXd p_vp_3d;
-    
-    Eigen::MatrixXd Kp;
-    Eigen::MatrixXd Kr;
-    Eigen::MatrixXd Bp;
-    Eigen::MatrixXd Br;
+    Eigen::MatrixXd M;       // Mass matrix
+    Eigen::MatrixXd M_inv;   // Inverse of mass matrix
+    Eigen::MatrixXd H;       // Homogeneous transformation matrix
+    Eigen::MatrixXd R;       // Rotation matrix
+    Eigen::Matrix3d R_z;     // Rotation matrix for z-axis transformations
+    Eigen::Matrix3d R_ee_i;  // End-effector rotation matrix
+    Eigen::MatrixXd J;       // Jacobian matrix
 
-    Eigen::VectorXd addConstraints(Eigen::VectorXd tauStack, double dt);
-    double getMaxValue(Eigen::VectorXd myVector);
-    double getMinValue(Eigen::VectorXd myVector);
+    // Initial Transformation Matrices
+    Eigen::MatrixXd H_rw_ini;  // Initial transformation of external system
+    Eigen::MatrixXd p_rw_ini;  // Initial position in external system
+    Eigen::MatrixXd H_ini;     // Initial transformation of robot
+    Eigen::MatrixXd R_ini;     // Initial rotation of robot
+    Eigen::VectorXd p_ini;     // Initial position of robot
+    Eigen::VectorXd p;         // Current position
+    Eigen::VectorXd p_0_ini;   // Initial reference position
+    Eigen::VectorXd p_vp_3d;   // Position difference in 3D space
 
-    
-    // Force-Torque Sensor
-    double* f_sens_ee;
-    Eigen::VectorXd f_ext_ee;
-    Eigen::VectorXd m_ext_ee;
-    Eigen::VectorXd f_ext_0;
-    Eigen::VectorXd m_ext_0;
-    Eigen::VectorXd F_ext_0;
-
-    // files
-    std::string filenameTest;
-
-    
-    std::vector<double> timestamps;
-    std::vector<Eigen::VectorXd> positions;
-    std::vector<Eigen::Matrix3d> rotations;
-    
-    int step;
-
-
+    // Impedance Control Parameters
+    Eigen::MatrixXd Kp;  // Translational stiffness
+    Eigen::MatrixXd Kr;  // Rotational stiffness
+    Eigen::MatrixXd Bp;  // Translational damping
+    Eigen::MatrixXd Br;  // Rotational damping
 
 };
 
