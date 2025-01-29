@@ -155,8 +155,8 @@ void MyLBRClient::runStreamerThread() {
 // Start Python Script
 void MyLBRClient::startPythonScript() {
     boost::thread pythonThread([]() {
-        const std::string pythonScriptPath = "/home/newman_lab/Desktop/noah_repo/thesis-mit/VisionProCppCommunication.py";
-
+        const std::string pythonScriptPath = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/VisionProCppCommunication.py";
+        //const std::string pythonScriptPath = "/../VisionProCppCommunication.py";
         const std::string pythonCommand = "python3 " + pythonScriptPath;
 
         int retCode = system(pythonCommand.c_str());
