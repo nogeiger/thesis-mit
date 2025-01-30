@@ -107,49 +107,14 @@ train_dataset, valid_dataset, test_dataset = get_datasets(
     data,
     split_params,
 )
-
-###############################
-#Zero-shot evaluation method
-TTM_MODEL_PATH = "ibm-granite/granite-timeseries-ttm-r1"
-
-zeroshot_model = get_model(
-    TTM_MODEL_PATH,
-    context_length=context_length,
-    prediction_length=forecast_length,
-    prediction_channel_indices=tsp.prediction_channel_indices,
-    num_input_channels=tsp.num_input_channels,
-)
-#print(zeroshot_model)
-
-
-#print(tsp.prediction_channel_indices)
-#print(tsp.num_input_channels)
-
-temp_dir = tempfile.mkdtemp()
-# zeroshot_trainer
-zeroshot_trainer = Trainer(
-    model=zeroshot_model,
-    args=TrainingArguments(
-        output_dir=temp_dir,
-        per_device_eval_batch_size=64,
-    ),
-)
-print(zeroshot_trainer.evaluate(test_dataset))
-
-# plot
-plot_predictions(
-    model=zeroshot_trainer.model,
-    dset=test_dataset,
-    plot_dir=os.path.join(OUT_DIR, "bike_sharing"),
-    plot_prefix="test_zeroshot",
-    channel=0,
-)
-
-
+# TTM Model path. The default model path is Granite-R2. Below, you can choose other TTM releases.
+TTM_MODEL_PATH = "ibm-granite/granite-timeseries-ttm-r2"
+# TTM_MODEL_PATH = "ibm-granite/granite-timeseries-ttm-r1"
+# TTM_MODEL_PATH = "ibm-research/ttm-research-r2"
 
 
 ###############################
-#Fewshot from now
+#Fewshot Training
 finetune_forecast_model = get_model(
     TTM_MODEL_PATH,
     context_length=context_length,
