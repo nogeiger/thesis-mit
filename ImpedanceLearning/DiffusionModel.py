@@ -27,11 +27,11 @@ def main():
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
-    noise_with_force = True # Set this to True if you want to use forces as the noise
+    noise_with_force = False#True # Set this to True if you want to use forces as the noise
     beta_start = 0.001 #for the noise diffusion model
     beta_end = 0.05 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
-    add_gaussian_noise = True # to add additional guassian noise
+    add_gaussian_noise = False#True # to add additional guassian noise
 
     # File path to the real data
     file_path = "Data/1D_diffusion/SimData"
@@ -67,8 +67,8 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
     criterion = loss_function_start_point
@@ -142,17 +142,18 @@ def main():
     # Inference: Iterative denoising
     ###########################
     # Start with a noisy trajectory and progressively denoise
-    noise_trajectory = noisy_trajectory.clone()
+    denoised_trajectory = noisy_trajectory.clone()
 
     # Number of denoising steps
-    num_denoising_steps = noiseadding_steps  # this should be the same as the number of noise steps used in training
+    num_denoising_steps = 1#noiseadding_steps  # this should be the same as the number of noise steps used in training
 
-    for step in range(num_denoising_steps):
+
+    for step in range (num_denoising_steps):
         # Predict the noise at the current step
-        predicted_noise = model(noise_trajectory, force) if use_forces else model(noise_trajectory)
+        predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
 
         # Subtract the predicted noise to denoise the trajectory
-        denoised_trajectory = noise_trajectory - predicted_noise
+        denoised_trajectory = denoised_trajectory - predicted_noise
 
 
     # Detach and move the clean and denoised trajectories to CPU before plotting
