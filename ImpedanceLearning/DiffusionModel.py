@@ -6,8 +6,8 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-
-from models import NoisePredictorInitial, NoisePredictorLSTM
+import random
+from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorLSTMWithAttention, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConvLSTM, NoisePredictorConv1D, NoisePredictorHybrid, NoisePredictorTCN
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
@@ -28,20 +28,19 @@ def main():
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
-    beta_start = 0.001 #for the noise diffusion model
-    beta_end = 0.05 #for the noise diffusion model
+    beta_start = 0.00001 #for the noise diffusion model
+    beta_end = 0.00025 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
 
     # File path to the real data
-    file_path = "Data/1D_diffusion/SimData"
- 
+    file_path = "Data/1D_diffusion_large_data"
 
     #if force is used as noise, then force should not be used as input
     if noise_with_force:
             use_forces = False
 
-    print(calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
+    print("max noise factor per batch and step: ",calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
 
     # Load real data
     data = load_robot_data(file_path, seq_length)
@@ -67,8 +66,19 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
     #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorConvLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
+
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
     criterion = loss_function_start_point
@@ -114,6 +124,7 @@ def main():
     # Visualize predictions (Noise and Clean Trajectories)
     model.eval()
     clean_trajectory, noisy_trajectory, force = next(iter(val_loader))  # Get data from dataloader
+
     clean_trajectory = clean_trajectory.to(device)
     noisy_trajectory = noisy_trajectory.to(device)
     force = force.to(device)
@@ -121,7 +132,7 @@ def main():
     with torch.no_grad():        
         # Calculate the actual noise added to the clean trajectory
         actual_noise = noisy_trajectory - clean_trajectory
-        
+            
         # Predict the noise from the noisy trajectory
         predicted_noise = model(noisy_trajectory, force) if use_forces else model(noisy_trajectory)
         
@@ -145,7 +156,7 @@ def main():
     denoised_trajectory = noisy_trajectory.clone()
 
     # Number of denoising steps
-    num_denoising_steps = 1#noiseadding_steps  # this should be the same as the number of noise steps used in training
+    num_denoising_steps = noiseadding_steps  # this should be the same as the number of noise steps used in training
 
 
     for step in range (num_denoising_steps):
@@ -160,6 +171,22 @@ def main():
     noisy_trajectory = val_dataset.denormalize(noisy_trajectory.detach().cpu(), "pos").numpy()
     clean_trajectory = val_dataset.denormalize(clean_trajectory.detach().cpu(), "pos_0").numpy()
     denoised_trajectory = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
+
+    # Compute mean absolute difference per axis
+    mean_diff_x = np.mean(np.abs(clean_trajectory[:, :, 0] - denoised_trajectory[:, :, 0]))
+    mean_diff_y = np.mean(np.abs(clean_trajectory[:, :, 1] - denoised_trajectory[:, :, 1]))
+    mean_diff_z = np.mean(np.abs(clean_trajectory[:, :, 2] - denoised_trajectory[:, :, 2]))
+
+    # Overall mean difference across all axes
+    overall_mean_diff = np.mean(np.abs(clean_trajectory - denoised_trajectory))
+
+    # Print results
+    print(f"Mean Absolute Difference (x-axis): {mean_diff_x:.6f}")
+    print(f"Mean Absolute Difference (y-axis): {mean_diff_y:.6f}")
+    print(f"Mean Absolute Difference (z-axis): {mean_diff_z:.6f}")
+    print(f"Overall Mean Absolute Difference: {overall_mean_diff:.6f}")
+
+
 
     # Plot the clean trajectory and denoised trajectory
     plt.figure(figsize=(10, 5))
