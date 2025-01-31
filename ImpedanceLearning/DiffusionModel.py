@@ -9,17 +9,19 @@ import pandas as pd
 import random
 from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorLSTMWithAttention, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConvLSTM, NoisePredictorConv1D, NoisePredictorHybrid, NoisePredictorTCN
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
-from train_val_test import train_model_diffusion, validate_model_diffusion
+from train_val_test import train_model_diffusion, validate_model_diffusion, test_model
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
 
-    
+
+
+
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """ 
     
     # Hyperparameters
-    seq_length = 100 #seq len of data
+    seq_length = 256 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 128 #hidden dim of the model
     batch_size = 32 #batch size
@@ -28,6 +30,9 @@ def main():
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
+    #if force is used as noise, then force should not be used as input
+    if noise_with_force:
+            use_forces = False
     beta_start = 0.00001 #for the noise diffusion model
     beta_end = 0.00025 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
@@ -35,10 +40,6 @@ def main():
 
     # File path to the real data
     file_path = "Data/1D_diffusion_large_data"
-
-    #if force is used as noise, then force should not be used as input
-    if noise_with_force:
-            use_forces = False
 
     print("max noise factor per batch and step: ",calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
 
@@ -70,12 +71,12 @@ def main():
     #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConvLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
@@ -119,92 +120,8 @@ def main():
     plt.legend()
     plt.show()
     
-    # Visualize predictions (Noise and Clean Trajectories)
-    model.eval()
-    clean_trajectory, noisy_trajectory, force = next(iter(val_loader))  # Get data from dataloader
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=5)
 
-    clean_trajectory = clean_trajectory.to(device)
-    noisy_trajectory = noisy_trajectory.to(device)
-    force = force.to(device)
-    
-    with torch.no_grad():        
-        # Calculate the actual noise added to the clean trajectory
-        actual_noise = noisy_trajectory - clean_trajectory
-            
-        # Predict the noise from the noisy trajectory
-        predicted_noise = model(noisy_trajectory, force) if use_forces else model(noisy_trajectory)
-        
-
-    # Plot predictions for the noise (x, y, z)
-    plt.figure(figsize=(10, 5))
-    for i, label in enumerate(['x', 'y', 'z']):
-        if i != 1:
-            continue
-        plt.plot(actual_noise.detach().cpu()[0, :, i], label=f'Actual Noise {label}')
-        plt.plot(predicted_noise.detach().cpu()[0, :, i], linestyle='-.', label=f'Predicted Noise {label}')
-    plt.xlabel('Time Step')
-    plt.ylabel('Noise')
-    plt.title('Noise Prediction')
-    plt.legend()
-    plt.show()
-    
-    # Inference: Iterative denoising
-    ###########################
-    # Start with a noisy trajectory and progressively denoise
-    denoised_trajectory = noisy_trajectory.clone()
-
-    # Number of denoising steps
-    num_denoising_steps = 1#noiseadding_steps  # this should be the same as the number of noise steps used in training
-
-
-    for step in range (num_denoising_steps):
-        # Predict the noise at the current step
-        predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
-
-        # Subtract the predicted noise to denoise the trajectory
-        denoised_trajectory = denoised_trajectory - predicted_noise
-
-
-    # Detach and move the clean and denoised trajectories to CPU before plotting
-    noisy_trajectory = val_dataset.denormalize(noisy_trajectory.detach().cpu(), "pos").numpy()
-    clean_trajectory = val_dataset.denormalize(clean_trajectory.detach().cpu(), "pos_0").numpy()
-    denoised_trajectory = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
-
-    # Compute mean absolute difference per axis
-    mean_diff_x = np.mean(np.abs(clean_trajectory[:, :, 0] - denoised_trajectory[:, :, 0]))
-    mean_diff_y = np.mean(np.abs(clean_trajectory[:, :, 1] - denoised_trajectory[:, :, 1]))
-    mean_diff_z = np.mean(np.abs(clean_trajectory[:, :, 2] - denoised_trajectory[:, :, 2]))
-
-    # Overall mean difference across all axes
-    overall_mean_diff = np.mean(np.abs(clean_trajectory - denoised_trajectory))
-
-    # Print results
-    print(f"Mean Absolute Difference (x-axis): {mean_diff_x:.6f}")
-    print(f"Mean Absolute Difference (y-axis): {mean_diff_y:.6f}")
-    print(f"Mean Absolute Difference (z-axis): {mean_diff_z:.6f}")
-    print(f"Overall Mean Absolute Difference: {overall_mean_diff:.6f}")
-
-
-
-    # Plot the clean trajectory and denoised trajectory
-    plt.figure(figsize=(10, 5))
-    for i, label in enumerate(['x', 'y', 'z']):
-        if i != 1:  # Adjust this condition based on which axis you want to plot
-            continue
-
-        # Plot the ground truth clean trajectory
-        plt.plot(clean_trajectory[0, :, i], label=f'Ground Truth Clean {label}')
-        
-        # Plot the denoised trajectory
-        plt.plot(denoised_trajectory[0, :, i], linestyle='-.', label=f'Denoised {label}')
-
-        
-    plt.xlabel('Time Step')
-    plt.ylabel('Position')
-    plt.title('Clean and Denoised Trajectory Comparison')
-    plt.legend()
-    plt.show()
-    
 
 if __name__ == "__main__":
     main()
