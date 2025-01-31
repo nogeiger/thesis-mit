@@ -16,10 +16,10 @@ find_package(Qt5 REQUIRED COMPONENTS Core Concurrent)
 # Include directories
 set(includeDir
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/Explicit-cpp/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/myFRIClient/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/Explicit-cpp/Eigen
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/FTSensor/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/Explicit-cpp/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/myFRIClient/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/Explicit-cpp/Eigen
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/FTSensor/include
   ${Python3_INCLUDE_DIRS} # Include Python headers dynamically
   /home/newman_lab/.local/lib/python3.10/site-packages/pybind11/include # Add Pybind11 here
 )
@@ -36,9 +36,10 @@ list(FILTER sourceFiles EXCLUDE REGEX "CMakeFiles/.*CompilerId.*")
 add_executable(${PROJECT_NAME} ${sourceFiles})
 
 # Linking
-set(EXPLICIT_CPP_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/Explicit-cpp/lib/libExplicit-cpp.so" CACHE STRING "Explicit-cpp library")
-set(FRI_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/myFRIClient/lib/libFRIClient.a" CACHE STRING "FRI library")
-set(SENSOR_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../Libraries/FTSensor/lib/libFTSensor.so" CACHE STRING "FTSensor library")
+set(EXPLICIT_CPP_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/Explicit-cpp/lib/libExplicit-cpp.so" CACHE STRING "Explicit-cpp library")
+#/home/newman_lab/Desktop/noah_repo/Explicit-FRI/Libraries/Explicit-cpp/lib/libExplicit-cpp.so
+set(FRI_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/myFRIClient/lib/libFRIClient.a" CACHE STRING "FRI library")
+set(SENSOR_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/FTSensor/lib/libFTSensor.so" CACHE STRING "FTSensor library")
 
 set(linkLibraries
   ${EXPLICIT_CPP_LIBRARY}

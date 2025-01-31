@@ -67,7 +67,6 @@ def main():
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
     #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
@@ -77,7 +76,6 @@ def main():
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
     model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
-
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
@@ -156,7 +154,7 @@ def main():
     denoised_trajectory = noisy_trajectory.clone()
 
     # Number of denoising steps
-    num_denoising_steps = noiseadding_steps  # this should be the same as the number of noise steps used in training
+    num_denoising_steps = 1#noiseadding_steps  # this should be the same as the number of noise steps used in training
 
 
     for step in range (num_denoising_steps):
