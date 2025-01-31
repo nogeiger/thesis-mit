@@ -81,6 +81,7 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
         beta = beta_values[step]  # Beta increases over time
 
         # Scale the actual noise by sqrt(beta) and add it to the clean trajectory
+        #print("wurzel beta value: ", torch.sqrt(beta))
         noise_to_add = actual_noise * torch.sqrt(beta)
         noisy_trajectory_output += noise_to_add
 

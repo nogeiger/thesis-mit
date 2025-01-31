@@ -20,9 +20,9 @@ def compute_statistics_per_axis(data):
         dict: A dictionary containing min and max for each axis (x, y, z) for both clean and noisy trajectories.
     """
     # Concatenate both clean (pos_0) and noisy (pos) trajectories for each sample
-    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0)  # Shape: [total_points, 3]
-    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0)  # Shape: [total_points, 3]
-    force_data = np.concatenate([sample["force"] for sample in data], axis=0)  # Shape: [total_points, 3]
+    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
+    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
+    force_data = np.concatenate([sample["force"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
 
     # Calculate min and max values for each axis (x, y, z) separately
     min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
@@ -167,9 +167,16 @@ def load_robot_data(folder_path, seq_length):
             filepath = os.path.join(folder_path, filename)
             try:
                 # Load the data while skipping the header row
-                df = pd.read_csv(filepath, sep="\t", skiprows=1, header=None)
-                df.columns = ["Time", "Pos_0_x", "Pos_0_y", "Pos_0_z", "Pos_x", "Pos_y", "Pos_z", "Force_x", "Force_y", "Force_z"]
+                df = pd.read_csv(filepath, sep="\t", skiprows=2, header=None, dtype=str)  # Read as strings first
 
+                # Convert all columns to numeric, setting non-numeric values to NaN
+                df = df.apply(pd.to_numeric, errors="coerce")
+
+                # Drop any rows that contain NaN (i.e., rows with non-numeric data)
+                df.dropna(inplace=True)
+
+                # Rename columns after ensuring the data is clean
+                df.columns = ["Time", "Pos_0_x", "Pos_0_y", "Pos_0_z", "Pos_x", "Pos_y", "Pos_z", "Force_x", "Force_y", "Force_z"]
                 # Verify the total rows and sequence length
                 if len(df) < seq_length:
                     print(f"Skipping file {filename} as it contains fewer rows ({len(df)}) than the required sequence length ({seq_length}).")
