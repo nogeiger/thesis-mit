@@ -34,15 +34,22 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
     for epoch in range(num_epochs):
         total_loss = 0
-        print(f"Starting epoch {epoch + 1}/{num_epochs}...")
+        #print(f"Starting epoch {epoch + 1}/{num_epochs}...")
 
         # Use tqdm to create a progress bar
         for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
+            # Print batch processing
+            print(f"🟢 Processing batch {batch_idx+1}/{len(dataloader)}")
+
             # Move data to device
             clean_trajectory = pos_0.to(device)
             complete_noisy_trajectory = pos.to(device)
             force = force.to(device)
+
+            # Check shapes of inputs
+            #print(f"📏 Batch {batch_idx+1} Shapes -> pos_0: {clean_trajectory.shape}, pos: {complete_noisy_trajectory.shape}, force: {force.shape}")
+
 
             # Dynamically add noise
             noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
@@ -159,6 +166,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
 
     # Initialize lists for mean absolute differences
     mean_diffs_x, mean_diffs_y, mean_diffs_z, overall_mean_diffs = [], [], [], []
+    stiffness_values = []
 
     for sample_idx, idx in enumerate(sample_indices):
         # Fetch a **random sample** instead of always using the first batch
@@ -179,6 +187,22 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         noisy_trajectory_np = val_dataset.denormalize(noisy_trajectory.detach().cpu(), "pos").numpy()
         clean_trajectory_np = val_dataset.denormalize(clean_trajectory.detach().cpu(), "pos_0").numpy()
         denoised_trajectory_np = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
+        force_np = val_dataset.denormalize(force.detach().cpu(), "force").numpy()
+
+
+        # Compute stiffness K = F / (x - x_0)
+        displacement = noisy_trajectory_np - clean_trajectory_np  # (x - x_0)
+        stiffness = np.divide(force_np, displacement, out=np.zeros_like(force_np), where=displacement != 0)
+
+        # Compute mean stiffness for the sample
+        mean_stiffness = np.mean(stiffness)
+        stiffness_values.append(mean_stiffness)
+
+        # Compute mean absolute differences
+        mean_diff_x = np.mean(np.abs(clean_trajectory_np[:, :, 0] - noisy_trajectory_np[:, :, 0]))
+        mean_diff_y = np.mean(np.abs(clean_trajectory_np[:, :, 1] - noisy_trajectory_np[:, :, 1]))
+        mean_diff_z = np.mean(np.abs(clean_trajectory_np[:, :, 2] - noisy_trajectory_np[:, :, 2]))
+        overall_mean_diff = np.mean(np.abs(clean_trajectory_np - noisy_trajectory_np))
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_trajectory_np[:, :, 0] - denoised_trajectory_np[:, :, 0]))
@@ -211,6 +235,10 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
     print(f"Y-axis: {np.mean(mean_diffs_y):.6f}")
     print(f"Z-axis: {np.mean(mean_diffs_z):.6f}")
     print(f"Overall: {np.mean(overall_mean_diffs):.6f}")
+
+    # Print Mean Stiffness Values
+    print(f"\nMean Stiffness Across {num_samples} Samples: {np.mean(stiffness_values):.6f}")
+
 
     # Keep plots open until the user closes them
     plt.pause(0.1)

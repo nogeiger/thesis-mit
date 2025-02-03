@@ -21,12 +21,12 @@ def main():
     """ 
     
     # Hyperparameters
-    seq_length = 256 #seq len of data
+    seq_length = 128 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 128 #hidden dim of the model
-    batch_size = 32 #batch size
-    num_epochs = 100 #number of epochs
-    learning_rate = 1e-3 #learning rate
+    hidden_dim = 512 #hidden dim of the model
+    batch_size = 64 #batch size
+    num_epochs = 300 #number of epochs
+    learning_rate = 1e-5 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
@@ -64,20 +64,25 @@ def main():
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    print(f"Total sequences loaded: {len(train_dataset)} for training, {len(val_dataset)} for validation.")
+    print(f"Total batches per epoch: {len(train_loader)} (Expected: {len(train_dataset) // 64})")
+
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConvLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total Model Parameters: {num_params}")
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.MSELoss()
     criterion = loss_function_start_point
@@ -120,8 +125,14 @@ def main():
     plt.legend()
     plt.show()
     
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=5)
+    num_denoising_steps=noiseadding_steps
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
 
+    num_denoising_steps=noiseadding_steps+5
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
+
+    num_denoising_steps=noiseadding_steps-5
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
 
 if __name__ == "__main__":
     main()
