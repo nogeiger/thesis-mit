@@ -119,24 +119,12 @@ def main():
         add_gaussian_noise,
         save_interval = 20, 
         save_path = "save_checkpoints")
-    
-    #val_loss = validate_model_diffusion(
-    #    model, 
-    #    val_loader,
-    #    criterion, 
-    #    device, 
-    #    noiseadding_steps, 
-    #    beta_start, 
-    #    beta_end, 
-    #    use_forces, 
-    #    noise_with_force,
-    #    add_gaussian_noise)
+
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
     plt.plot(range(1, num_epochs + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
-    #plt.axhline(val_loss, color='red', linestyle='--', label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
@@ -144,6 +132,9 @@ def main():
     plt.show()
     
     num_denoising_steps=noiseadding_steps
+    # Load best model
+    model.load_state_dict(torch.load("save_checkpoints/best_model.pth"))
+    model.to(device)
     test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
 
 
