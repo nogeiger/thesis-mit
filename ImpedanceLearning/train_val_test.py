@@ -9,10 +9,12 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from utils import loss_function, add_noise
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 
 
 def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
-                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False):
+                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, save_path = "save_checkpoints"):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -32,6 +34,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     model.train()
     epoch_losses = []
 
+
     for epoch in range(num_epochs):
         total_loss = 0
         #print(f"Starting epoch {epoch + 1}/{num_epochs}...")
@@ -40,7 +43,7 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
             # Print batch processing
-            print(f"🟢 Processing batch {batch_idx+1}/{len(dataloader)}")
+            #print(f"🟢 Processing batch {batch_idx+1}/{len(dataloader)}")
 
             # Move data to device
             clean_trajectory = pos_0.to(device)
@@ -84,6 +87,13 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
         avg_loss = total_loss / len(dataloader)
         epoch_losses.append(avg_loss)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+        # Save model every 'save_interval' epochs
+        if (epoch + 1) % save_interval == 0:
+            
+            checkpoint_path = os.path.join(save_path, f"model_epoch_{epoch + 1}.pth")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f" Model saved at {checkpoint_path}")
     
     return epoch_losses
 

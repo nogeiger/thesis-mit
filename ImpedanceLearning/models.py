@@ -122,7 +122,7 @@ class NoisePredictorLSTM(nn.Module):
         return predicted_noise
     
 class NoisePredictorTransformer(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=4, nhead=4, dropout=0.2):
+    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=8, nhead=8, dropout=0.3):
         super(NoisePredictorTransformer, self).__init__()
         self.use_forces = use_forces
         self.hidden_dim = hidden_dim
