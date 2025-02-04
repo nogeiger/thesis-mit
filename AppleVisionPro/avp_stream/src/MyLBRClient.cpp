@@ -109,16 +109,6 @@ void MyLBRClient::runStreamerThread() {
         int timeout_counter = 0;
         while (true) {
             if (*ready_flag == 1) {  // Check if Python has written new data
-                //                std::cout << "C++ detected Ready flag: " << *ready_flag << std::endl;
-
-                // Read and process the matrix
-                //                std::cout << "C++ read Matrix data:" << std::endl;
-                //                for (int i = 0; i < 4; i++) {
-                //                    for (int j = 0; j < 4; j++) {
-                //                        std::cout << matrix_data[i * 4 + j] << " ";
-                //                    }
-                //                    std::cout << std::endl;
-                //                }
 
                 // Be carful, Johannes was there
                 dataMutex.lock();
@@ -180,13 +170,21 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     /** Initialization */
 
     // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    qInitial[0] = 12.58 * M_PI/180;
-    qInitial[1] = 40.27 * M_PI/180;
-    qInitial[2] = -0.01 * M_PI/180;
-    qInitial[3] = -99.70 * M_PI/180;
-    qInitial[4] = -0.01 * M_PI/180;
-    qInitial[5] = 40.03 * M_PI/180;
-    qInitial[6] = 12.59 * M_PI/180;
+    //    qInitial[0] = 12.58 * M_PI/180;
+    //    qInitial[1] = 40.27 * M_PI/180;
+    //    qInitial[2] = -0.01 * M_PI/180;
+    //    qInitial[3] = -99.70 * M_PI/180;
+    //    qInitial[4] = -0.01 * M_PI/180;
+    //    qInitial[5] = 40.03 * M_PI/180;
+    //    qInitial[6] = 12.59 * M_PI/180;
+
+    qInitial[0] = -8.87 * M_PI/180;
+    qInitial[1] = 60.98 * M_PI/180;
+    qInitial[2] = 17.51 * M_PI/180;
+    qInitial[3] = -79.85 * M_PI/180;
+    qInitial[4] = -24.13 * M_PI/180;
+    qInitial[5] = 43.03 * M_PI/180;
+    qInitial[6] = 4.14 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
     myLBR = new iiwa14( 1, "Trey");
@@ -243,9 +241,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     // Translational impedances
     Kp = Eigen::MatrixXd::Identity( 3, 3 );
-    Kp = 900 * Kp;
+    Kp = 400 * Kp;
     Bp = Eigen::MatrixXd::Identity( 3, 3 );
-    Bp = 70 * Bp;
+    Bp = 40 * Bp;
 
     // Rotational impedances
     Kr = Eigen::MatrixXd::Identity( 3, 3 );
@@ -257,7 +255,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // AVP streamer
     // ************************************************************
 
-    // Lock mutex initially
+    // Unock mutex initially
     dataMutex.unlock();
     boost::thread(&MyLBRClient::runStreamerThread, this).detach();
 
@@ -269,6 +267,35 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     p_rw_ini = Eigen::VectorXd::Zero( 3 );
 
     matrix = new double[16];
+
+    // ************************************************************
+    // Store data
+    // ************************************************************
+
+    // Open a single binary file
+    File_data.open("/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/File_data.bin", std::ios::binary);
+    if (!File_data) {
+        std::cerr << "Error opening file for writing!" << std::endl;
+    }
+
+
+    // ************************************************************
+    // INCLUDE FT-SENSOR
+    // ************************************************************
+    // Weight: 0.2kg (plate) + 0.255kg (sensor) = 0.455kg
+
+    f_ext_ee = Eigen::VectorXd::Zero( 3 );
+    m_ext_ee = Eigen::VectorXd::Zero( 3 );
+    f_ext_0 = Eigen::VectorXd::Zero( 3 );
+    m_ext_0 = Eigen::VectorXd::Zero( 3 );
+    F_ext_0 = Eigen::VectorXd::Zero( 6 );
+
+    AtiForceTorqueSensor ftSensor("172.31.1.1");
+    mutexFTS.unlock();
+    // Start threading for force sensor
+    boost::thread(&MyLBRClient::forceSensorThread, this).detach();
+
+    printf( "Sensor Activated. \n\n" );
 
     // ************************************************************
     // Initial print
@@ -291,7 +318,11 @@ MyLBRClient::~MyLBRClient()
 
     boost::interprocess::shared_memory_object::remove("SharedMemory_AVP");
     delete myLBR;
+    delete this->ftSensor;
 
+    if (File_data.is_open()) {
+        File_data.close();
+    }
 
 }
 
@@ -417,19 +448,44 @@ void MyLBRClient::command()
         startPythonScript();
     }
 
-    double* test_matrix;
+    double* trafo_vp;
     Eigen::MatrixXd H_rw;
     Eigen::VectorXd p_rw;
 
     // Lock mutex and update local variables from shared memory
     dataMutex.lock();
 
-    test_matrix = matrix;
+    trafo_vp = matrix;
 
     dataMutex.unlock();
 
-    H_rw = Eigen::Map<Eigen::MatrixXd>(test_matrix, 4, 4);
+    H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
     p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
+
+    // ************************************************************
+    // Get FTSensor data
+
+    //f_sens_ee = ftSensor->Acquire();
+    double* fts_bt;
+
+    mutexFTS.lock();
+
+    fts_bt = f_sens_ee;
+
+    mutexFTS.unlock();
+
+    f_ext_ee[0] = fts_bt[0];
+    f_ext_ee[1] = fts_bt[1];
+    f_ext_ee[2] = fts_bt[2];
+    m_ext_ee[0] = fts_bt[3];
+    m_ext_ee[1] = fts_bt[4];
+    m_ext_ee[2] = fts_bt[5];
+
+    f_ext_0 = R * f_ext_ee;
+    m_ext_0 = R * m_ext_ee;
+
+    //cout << "f_ext_0: " << f_ext_0 << endl;
+
 
     // ************************************************************
     // Get robot measurements
@@ -579,15 +635,50 @@ void MyLBRClient::command()
     tau_previous = tau_motion;
     tau_prev_prev = tau_previous;
 
-
     // Print stuff (later if needed)
     if( currentTime < sampleTime )
     {
-        //        DO STUFF
+
+        //TODO
+
     }
+
+    // Buffer binary data
+    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
+    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
+    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+
+    // Periodic flush to file (e.g., every 1000 iterations)
+    if (buffer.str().size() > 4096) { // Write every 4KB of data
+        File_data.write(buffer.str().c_str(), buffer.str().size());
+        buffer.str("");  // Clear buffer
+        buffer.clear();
+    }
+
 
     currentTime = currentTime + sampleTime;
 
+}
+
+
+//******************************************************************************
+void MyLBRClient::forceSensorThread()
+{
+    while(true){
+
+        double* ftsSignal = ftSensor->Acquire();
+
+        //****************** Update everyting at the end with one Mutex ******************//
+        mutexFTS.lock();
+
+        f_sens_ee = ftsSignal;
+
+        mutexFTS.unlock();
+
+
+    }
 }
 
 

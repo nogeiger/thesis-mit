@@ -41,6 +41,7 @@ or otherwise, without the prior written consent of KUKA Roboter GmbH.
 
 #include "friLBRClient.h"
 #include "exp_robots.h"
+#include "AtiForceTorqueSensor.h"
 
 #include <boost/thread.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
@@ -114,6 +115,7 @@ private:
 
     void runStreamerThread();
     void startPythonScript();
+    void forceSensorThread();
 
     double* matrix;
 
@@ -198,22 +200,29 @@ private:
 
     
     // Force-Torque Sensor
+    AtiForceTorqueSensor *ftSensor;
     double* f_sens_ee;
+    double* fts_first;
     Eigen::VectorXd f_ext_ee;
     Eigen::VectorXd m_ext_ee;
     Eigen::VectorXd f_ext_0;
     Eigen::VectorXd m_ext_0;
     Eigen::VectorXd F_ext_0;
 
-    // files
-    std::string filenameTest;
+    boost::thread ftsThread;
+    boost::mutex mutexFTS;
 
+    // files
+    std::ostringstream buffer;
+    std::ofstream File_data;
     
     std::vector<double> timestamps;
     std::vector<Eigen::VectorXd> positions;
     std::vector<Eigen::Matrix3d> rotations;
     
     int step;
+
+
 
 
 
