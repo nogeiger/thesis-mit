@@ -25,7 +25,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 768 #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 21#300 #number of epochs
+    num_epochs = 2#300 #number of epochs
     learning_rate = 3e-5 #learning rate
     noiseadding_steps = 50 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -102,9 +102,10 @@ def main():
     criterion=nn.SmoothL1Loss()
 
     # Train and validate
-    train_losses = train_model_diffusion(
+    train_losses, val_loss = train_model_diffusion(
         model,
         train_loader, 
+        val_loader,
         optimizer, 
         criterion, 
         device, 
@@ -115,24 +116,27 @@ def main():
         use_forces,
         noise_with_force, 
         max_grad_norm,
-        add_gaussian_noise)
+        add_gaussian_noise,
+        save_interval = 20, 
+        save_path = "save_checkpoints")
     
-    val_loss = validate_model_diffusion(
-        model, 
-        val_loader,
-        criterion, 
-        device, 
-        noiseadding_steps, 
-        beta_start, 
-        beta_end, 
-        use_forces, 
-        noise_with_force,
-        add_gaussian_noise)
+    #val_loss = validate_model_diffusion(
+    #    model, 
+    #    val_loader,
+    #    criterion, 
+    #    device, 
+    #    noiseadding_steps, 
+    #    beta_start, 
+    #    beta_end, 
+    #    use_forces, 
+    #    noise_with_force,
+    #    add_gaussian_noise)
     
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
-    plt.axhline(val_loss, color='red', linestyle='--', label='Validation Loss')
+    plt.plot(range(1, num_epochs + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
+    #plt.axhline(val_loss, color='red', linestyle='--', label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')

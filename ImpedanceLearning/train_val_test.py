@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 
-def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
+def train_model_diffusion(model, traindataloader, valdataloader,optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
                           beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, save_path = "save_checkpoints"):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
@@ -31,28 +31,26 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
     Returns:
         list: List of average losses for each epoch.
     """
-    model.train()
-    epoch_losses = []
+    train_epoch_losses = []
+    val_epoch_losses = []
+
+    os.makedirs(save_path, exist_ok=True)  # Ensure save directory exists
+    best_val_loss = float('inf')  # Track best validation loss
+
 
 
     for epoch in range(num_epochs):
+        model.train()
         total_loss = 0
-        #print(f"Starting epoch {epoch + 1}/{num_epochs}...")
+        
 
         # Use tqdm to create a progress bar
-        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
-            
-            # Print batch processing
-            #print(f"🟢 Processing batch {batch_idx+1}/{len(dataloader)}")
+        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
 
             # Move data to device
             clean_trajectory = pos_0.to(device)
             complete_noisy_trajectory = pos.to(device)
             force = force.to(device)
-
-            # Check shapes of inputs
-            #print(f"📏 Batch {batch_idx+1} Shapes -> pos_0: {clean_trajectory.shape}, pos: {complete_noisy_trajectory.shape}, force: {force.shape}")
-
 
             # Dynamically add noise
             noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
@@ -84,18 +82,37 @@ def train_model_diffusion(model, dataloader, optimizer, criterion, device, num_e
 
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(dataloader)
-        epoch_losses.append(avg_loss)
-        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+        avg_train_loss = total_loss / len(traindataloader)
+        train_epoch_losses.append(avg_train_loss)
+
+
+        #Validation after each epoch
+        model.eval()  # Switch to evaluation mode
+        with torch.no_grad():
+            val_loss = validate_model_diffusion(
+                model, valdataloader, criterion, device, noiseadding_steps, beta_start, beta_end, 
+                use_forces, noise_with_force, add_gaussian_noise
+            )
+        val_epoch_losses.append(val_loss)
+        print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+
+
+        #Saving models
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_path = os.path.join(save_path, "best_model.pth")
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Best model saved at {best_model_path} after epoch{epoch+1}")
 
         # Save model every 'save_interval' epochs
         if (epoch + 1) % save_interval == 0:
-            
             checkpoint_path = os.path.join(save_path, f"model_epoch_{epoch + 1}.pth")
             torch.save(model.state_dict(), checkpoint_path)
             print(f" Model saved at {checkpoint_path}")
     
-    return epoch_losses
+
+    return train_epoch_losses, val_epoch_losses
 
 
 def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, 
