@@ -14,7 +14,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 def train_model_diffusion(model, traindataloader, valdataloader,optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
-                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, save_path = "save_checkpoints"):
+                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, 
+                          save_path = "save_checkpoints",patience = 10):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -36,14 +37,13 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
     os.makedirs(save_path, exist_ok=True)  # Ensure save directory exists
     best_val_loss = float('inf')  # Track best validation loss
-
+    early_stopping_counter = 0  # Count epochs since last improvement
 
 
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
         
-
         # Use tqdm to create a progress bar
         for batch_idx, (pos_0, pos, force) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
 
@@ -97,19 +97,29 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
 
-        #Saving models
-        # Save best model
+        # Early Stopping Check
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            early_stopping_counter = 0  # Reset counter
             best_model_path = os.path.join(save_path, "best_model.pth")
             torch.save(model.state_dict(), best_model_path)
-            print(f"Best model saved at {best_model_path} after epoch{epoch+1}")
+            print(f"Best model saved at {best_model_path} after epoch {epoch+1}")
+        else:
+            early_stopping_counter += 1
+            print(f"Early stopping patience: {early_stopping_counter}/{patience}")
+
+        # If no improvement for `patience` epochs, stop training
+        if early_stopping_counter >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs. Restoring best model.")
+            model.load_state_dict(torch.load(best_model_path))  # Restore best model
+            break  # Exit training loop
 
         # Save model every 'save_interval' epochs
         if (epoch + 1) % save_interval == 0:
             checkpoint_path = os.path.join(save_path, f"model_epoch_{epoch + 1}.pth")
             torch.save(model.state_dict(), checkpoint_path)
-            print(f" Model saved at {checkpoint_path}")
+            print(f"Model checkpoint saved at {checkpoint_path}")
+
     
 
     return train_epoch_losses, val_epoch_losses

@@ -25,7 +25,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 768 #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 2#300 #number of epochs
+    num_epochs = 300 #number of epochs
     learning_rate = 3e-5 #learning rate
     noiseadding_steps = 50 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -118,13 +118,16 @@ def main():
         max_grad_norm,
         add_gaussian_noise,
         save_interval = 20, 
-        save_path = "save_checkpoints")
+        save_path = "save_checkpoints",
+        patience=2)
 
     
-    # Plot training and validation loss
+    # Ensure x-axis matches the number of recorded epochs
+    epochs_trained = len(train_losses)
+
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
-    plt.plot(range(1, num_epochs + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
+    plt.plot(range(1, epochs_trained + 1), train_losses, label='Training Loss')
+    plt.plot(range(1, epochs_trained + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
@@ -133,7 +136,8 @@ def main():
     
     num_denoising_steps=noiseadding_steps
     # Load best model
-    model.load_state_dict(torch.load("save_checkpoints/best_model.pth"))
+    model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
+
     model.to(device)
     test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
 
