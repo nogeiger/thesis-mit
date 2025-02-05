@@ -122,7 +122,7 @@ class NoisePredictorLSTM(nn.Module):
         return predicted_noise
     
 class NoisePredictorTransformer(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=8, nhead=8, dropout=0.3):
+    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=2, nhead=2, dropout=0):
         super(NoisePredictorTransformer, self).__init__()
         self.use_forces = use_forces
         self.hidden_dim = hidden_dim
@@ -165,12 +165,12 @@ class NoisePredictorTransformer(nn.Module):
         x = self.trajectory_embedding(noisy_trajectory)  # [batch_size, seq_length, hidden_dim]
 
         # Add positional encoding before any attention
-        x = self.positional_encoding(x)
+        #x = self.positional_encoding(x)
 
-        if self.use_forces:
-            # Embed forces and apply attention fusion
-            force_embedded = self.force_embedding(forces)  # [batch_size, seq_length, hidden_dim]
-            x, _ = self.attention(query=x, key=force_embedded, value=force_embedded)
+        #if self.use_forces:
+        #    # Embed forces and apply attention fusion
+        #    force_embedded = self.force_embedding(forces)  # [batch_size, seq_length, hidden_dim]
+        #    x, _ = self.attention(query=x, key=force_embedded, value=force_embedded)
 
         # Pass through Transformer Encoder (which also has attention)
         x = self.transformer_encoder(x)

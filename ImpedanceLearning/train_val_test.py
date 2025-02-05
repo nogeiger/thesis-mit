@@ -53,7 +53,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
+            noisy_trajectory, noise_scale = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
                                          beta_end, noise_with_force, add_gaussian_noise)
             
             # Compute the max noise (actual noise) based on the flag
@@ -73,6 +73,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
             # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
+            loss = loss / noise_scale * 10000
             loss.backward()
 
             # Apply gradient clipping
@@ -152,7 +153,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
+            noisy_trajectory, noise_scale = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
                                          beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
             # Compute the max noise (actual noise) based on the flag
@@ -171,6 +172,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
             # Calculate loss
             loss = criterion(predicted_noise, actual_noise)
+            loss=loss / noise_scale * 10000
             total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)
@@ -253,19 +255,23 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         overall_mean_diffs.append(overall_mean_diff)
 
         # Create a separate figure for each sample
-        fig, ax_traj = plt.subplots(1, 1, figsize=(10, 5))
+        fig, ax_traj = plt.subplots(1, 1, figsize=(10, 6))
 
         # Plot clean vs denoised trajectory (Y-axis only)
-        ax_traj.plot(clean_trajectory_np[0, :, 1], label='Clean', alpha=0.7)
-        ax_traj.plot(denoised_trajectory_np[0, :, 1], linestyle='--', label='Denoised', alpha=0.7)
-        ax_traj.set_xlabel('Time Step')
-        ax_traj.set_ylabel('Position')
-        ax_traj.set_title(f'Clean vs Denoised Trajectory - Sample {sample_idx+1}')
-        ax_traj.legend()
+        ax_traj.plot(clean_trajectory_np[0, :, 1], label='Clean', linewidth=2.5, color='darkblue')
+        ax_traj.plot(denoised_trajectory_np[0, :, 1], linestyle='--', label='Denoised', linewidth=2.5, color='darkgreen')
+
+        # Customize plot appearance
+        ax_traj.set_xlabel('Time Step', fontsize=14)
+        ax_traj.set_ylabel('Position', fontsize=14)
+        ax_traj.set_title(f'Clean vs Denoised Trajectory - Sample {sample_idx+1}', fontsize=16)
+        ax_traj.legend(fontsize=12)
+        ax_traj.grid(True, linestyle="--", alpha=0.7)
+        ax_traj.tick_params(axis='both', labelsize=12, width=2, length=6)
 
         # Show plots without blocking execution
         plt.show(block=False)
-
+        
     # Print Mean Absolute Differences
     print(f"\nMean Absolute Differences Across {num_samples} Samples:")
     print(f"X-axis: {np.mean(mean_diffs_x):.6f}")

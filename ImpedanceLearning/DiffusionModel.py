@@ -20,31 +20,32 @@ def main():
     Main function to execute the training and validation of the NoisePredictor model.
     """ 
     
-    # Hyperparameters
-    seq_length = 128 #seq len of data
+    # Definition of parameters
+    seq_length = 64 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 768 #hidden dim of the model
+    hidden_dim = 512 #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 300 #number of epochs
-    learning_rate = 3e-5 #learning rate
-    noiseadding_steps = 50 # Number of steps to add noise
+    num_epochs = 1#500 #number of epochs
+    learning_rate = 3e-4 #learning rate
+    noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
     #if force is used as noise, then force should not be used as input
     if noise_with_force:
             use_forces = False
     beta_start = 0.0001 #for the noise diffusion model
-    beta_end = 0.0025 #for the noise diffusion model
+    beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
+    patience = 600 #for early stopping
+    save_interval = 20
+    save_path = "save_checkpoints"
 
     # File path to the real data
     file_path = "Data/1D_diffusion_large_data"
 
-    print("max noise factor per batch and step: ",calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
-
     # Load real data
-    data = load_robot_data(file_path, seq_length)
+    data = load_robot_data(file_path, seq_length, use_overlap=False)
     
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
@@ -53,7 +54,7 @@ def main():
     normalized_data = normalize_data_per_axis(data, stats)
 
     # Define split ratios
-    train_ratio = 0.7  
+    train_ratio = 0.7 
     val_ratio = 0.2  
 
     # Compute split indices
@@ -70,15 +71,13 @@ def main():
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
     test_dataset = ImpedanceDatasetDiffusion(test_data, stats)
-
-
+    
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     print(f"Total sequences loaded: {len(test_dataset)} for training, {len(test_dataset)} for validation.")
     print(f"Total batches per epoch: {len(test_loader)} (Expected: {len(test_dataset) // 64})")
-
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,14 +92,14 @@ def main():
     #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
-    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total Model Parameters: {num_params}")
+    #choose optimizer
     #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    #Choose loss
     #criterion = nn.MSELoss()
     #criterion = loss_function_start_point
     criterion=nn.SmoothL1Loss()
-
+    
     # Train and validate
     train_losses, val_loss = train_model_diffusion(
         model,
@@ -117,14 +116,13 @@ def main():
         noise_with_force, 
         max_grad_norm,
         add_gaussian_noise,
-        save_interval = 20, 
-        save_path = "save_checkpoints",
-        patience=2)
+        save_interval, 
+        save_path,
+        patience)
 
-    
+    #plot train losses
     # Ensure x-axis matches the number of recorded epochs
     epochs_trained = len(train_losses)
-
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, epochs_trained + 1), train_losses, label='Training Loss')
     plt.plot(range(1, epochs_trained + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
@@ -134,12 +132,13 @@ def main():
     plt.legend()
     plt.show()
     
-    num_denoising_steps=noiseadding_steps
+    
+    # Testing
     # Load best model
-    model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
-
+    model.load_state_dict(torch.load("save_checkpoints/model_epoch_500.pth", weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=num_denoising_steps, num_samples=5)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=5)
+
 
 
 if __name__ == "__main__":

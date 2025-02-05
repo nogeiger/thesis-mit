@@ -28,7 +28,7 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     return total_loss
 
 def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
-              beta_start=0.8, beta_end=0.1, noise_with_force=False, add_gaussian_noise=False):
+              beta_start, beta_end, noise_with_force=False, add_gaussian_noise=False):
 
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
@@ -74,19 +74,19 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     noisy_trajectory_output = clean_trajectory.clone()
 
     # Linear schedule for noise scale (beta values)
-    beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced values between beta_start and beta_end
-    
-    for step in range(noiseadding_steps):
-        # Get current noise scale based on the diffusion schedule
-        beta = beta_values[step]  # Beta increases over time
+    beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced beta values
+    alpha_values = 1 - beta_values  # Compute α from β
+    alpha_bar = torch.cumprod(alpha_values, dim=0)  # Compute cumulative product α̅
 
-        # Scale the actual noise by sqrt(beta) and add it to the clean trajectory
-        #print("wurzel beta value: ", torch.sqrt(beta))
-        noise_to_add = actual_noise * torch.sqrt(beta)
-        noisy_trajectory_output += noise_to_add
+    # Sample a random timestep t
+    t = torch.randint(0, noiseadding_steps, (1,)).item()  # Select a random diffusion step
 
+    # Compute the noisy trajectory at timestep t
+    noisy_trajectory_output = torch.sqrt(alpha_bar[t]) * clean_trajectory + torch.sqrt(1 - alpha_bar[t]) * actual_noise
+    #print(torch.sqrt(1 - alpha_bar[t]))
+    noise_scale = 1 / torch.sqrt(alpha_bar[t])
     
-    return noisy_trajectory_output
+    return noisy_trajectory_output, noise_scale
 
 
 def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):
