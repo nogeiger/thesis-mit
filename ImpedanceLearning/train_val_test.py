@@ -10,6 +10,7 @@ from tqdm import tqdm
 import random
 from utils import loss_function, add_noise
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from scipy.ndimage import uniform_filter1d
 
 
 
@@ -180,7 +181,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
     return avg_loss
 
 
-def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=1, num_samples=5):
+def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=1, num_samples=5, postprocessing = False):
     """
     Function to evaluate the model by predicting noise, performing iterative denoising,
     and visualizing the results.
@@ -228,6 +229,23 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         denoised_trajectory_np = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
         force_np = val_dataset.denormalize(force.detach().cpu(), "force").numpy()
 
+        if postprocessing == True:
+            #Preprocessing of denoise
+            # Compute the offset using the first point difference
+            #offset = clean_trajectory_np[:, 0, :] - denoised_trajectory_np[:, 0, :]
+            # Apply the offset to all points in the denoised trajectory
+            #denoised_trajectory_np += offset[:, np.newaxis, :]
+
+            # Compute the offset using the average of the first 5 points difference
+            offset = np.mean(clean_trajectory_np[:, :5, :] - denoised_trajectory_np[:, :5, :], axis=1)
+            # Apply the offset to all points in the denoised trajectory
+            denoised_trajectory_np += offset[:, np.newaxis, :]
+
+            # Apply smoothing using a moving average filter
+            window_size = 20  # Adjust the window size based on smoothing needs
+            denoised_trajectory_np = uniform_filter1d(denoised_trajectory_np, size=window_size, axis=1, mode='nearest')
+
+
 
         # Compute stiffness K = F / (x - x_0)
         displacement = noisy_trajectory_np - clean_trajectory_np  # (x - x_0)
@@ -237,11 +255,6 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         mean_stiffness = np.mean(stiffness)
         stiffness_values.append(mean_stiffness)
 
-        # Compute mean absolute differences
-        mean_diff_x = np.mean(np.abs(clean_trajectory_np[:, :, 0] - noisy_trajectory_np[:, :, 0]))
-        mean_diff_y = np.mean(np.abs(clean_trajectory_np[:, :, 1] - noisy_trajectory_np[:, :, 1]))
-        mean_diff_z = np.mean(np.abs(clean_trajectory_np[:, :, 2] - noisy_trajectory_np[:, :, 2]))
-        overall_mean_diff = np.mean(np.abs(clean_trajectory_np - noisy_trajectory_np))
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_trajectory_np[:, :, 0] - denoised_trajectory_np[:, :, 0]))

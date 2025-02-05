@@ -21,11 +21,11 @@ def main():
     """ 
     
     # Definition of parameters
-    seq_length = 64 #seq len of data
+    seq_length = 128 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 512 #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 1#500 #number of epochs
+    num_epochs = 500 #number of epochs
     learning_rate = 3e-4 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -137,7 +137,7 @@ def main():
     # Load best model
     model.load_state_dict(torch.load("save_checkpoints/model_epoch_500.pth", weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=5)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
 
 
 
