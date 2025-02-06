@@ -9,7 +9,7 @@ s = VisionProStreamer(ip=avp_ip, record=True)
 
 # Define shared memory parameters
 SHM_NAME = "SharedMemory_AVP"
-SHM_SIZE = 8 + 16 * 8  # 8 bytes for Ready flag + 16 doubles (4x4 matrix)
+SHM_SIZE = 8 + 16 * 8  + 8# 8 bytes for Ready flag + 16 doubles (4x4 matrix) + 8 bytes for wrist roll
 
 # Create shared memory
 try:
@@ -22,6 +22,7 @@ except FileExistsError:
 # Define shared memory regions
 version = np.ndarray((1,), dtype=np.int64, buffer=shm.buf[:8])  # Ready flag
 data = np.ndarray((4, 4), dtype=np.float64, buffer=shm.buf[8:])  # 4x4 matrix
+right_wrist_roll = np.ndarray((1,), dtype=np.float64, buffer=shm.buf[8+16*8:])  # Additional float64
 
 # Initialization
 version[0] = -1  # Indicate that Python is initializing
@@ -38,10 +39,11 @@ try:
 
         # Convert 'right_wrist' to a numpy array
         right_wrist_array = np.array(r['right_wrist'], dtype=np.float64)
-
+        right_wrist_roll_value = np.array([r['right_wrist_roll']], dtype=np.float64)
         # Write data to shared memory only if Ready flag is 0
         if version[0] == 0:
             data[:] = right_wrist_array #data_store  # Write new data
+            right_wrist_roll[:] = right_wrist_roll_value  # Write new roll data
             version[0] = 1        # Set Ready flag to 1
 
 

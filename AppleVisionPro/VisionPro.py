@@ -1,7 +1,7 @@
 import time
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.31.190.119"  # Replace with your actual IP
+avp_ip = "10.31.169.22"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 # Open a text file for writing
@@ -23,6 +23,8 @@ with open('streamed_data.txt', 'w') as f:
                 # Write data to the text file
                 f.write(f"Timestamp: {next_timestep:.6f}\n")
                 f.write(f"Right Wrist: {r['right_wrist'].tolist()}\n")
+                f.write(f"Right Wrist roll: {r['right_wrist_roll'].tolist()}\n")
+
                 f.write("\n")  # Separate each frame with a blank line
 
                 # Flush to ensure data is written immediately
