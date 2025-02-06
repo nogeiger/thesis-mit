@@ -118,6 +118,7 @@ private:
     void forceSensorThread();
 
     double* matrix;
+    double right_wrist_roll;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;

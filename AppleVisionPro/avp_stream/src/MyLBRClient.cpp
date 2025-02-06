@@ -97,6 +97,8 @@ void MyLBRClient::runStreamerThread() {
         // Define pointers based on shared memory layout
         int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
         double* matrix_data = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* right_wrist_roll_data = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 16 * sizeof(double));
+
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
@@ -114,6 +116,7 @@ void MyLBRClient::runStreamerThread() {
                 dataMutex.lock();
 
                 matrix = matrix_data;
+                right_wrist_roll = *right_wrist_roll_data;  // Read right_wrist_roll
 
                 dataMutex.unlock();
 
@@ -449,6 +452,7 @@ void MyLBRClient::command()
     }
 
     double* trafo_vp;
+    double wrist_roll;
     Eigen::MatrixXd H_rw;
     Eigen::VectorXd p_rw;
 
@@ -456,11 +460,15 @@ void MyLBRClient::command()
     dataMutex.lock();
 
     trafo_vp = matrix;
+    wrist_roll = right_wrist_roll;
 
     dataMutex.unlock();
 
     H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
     p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
+
+    std::cout << "Right Wrist Roll: " << wrist_roll << " radians" << std::endl;
+
 
     // ************************************************************
     // Get FTSensor data
