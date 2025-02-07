@@ -11,12 +11,14 @@ import random
 from utils import loss_function, add_noise
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import logging
 
 
 
 def train_model_diffusion(model, traindataloader, valdataloader,optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
                           beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, 
-                          save_path = "save_checkpoints",patience = 10):
+                          save_path = "save_checkpoints",early_stop_patience = 25):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
 
@@ -39,6 +41,12 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
     os.makedirs(save_path, exist_ok=True)  # Ensure save directory exists
     best_val_loss = float('inf')  # Track best validation loss
     early_stopping_counter = 0  # Count epochs since last improvement
+
+
+    # Initialize ReduceLROnPlateau
+    lr_scheduler_patience = max(5, int(early_stop_patience * 0.32))  # Reduce LR after 1/3 of early stopping patience
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=lr_scheduler_patience, verbose=True)
+
 
 
     for epoch in range(num_epochs):
@@ -74,7 +82,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
             # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
-            loss = loss / noise_scale * 10000
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
             # Apply gradient clipping
@@ -98,6 +106,15 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         val_epoch_losses.append(val_loss)
         print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
+        last_lr = optimizer.param_groups[0]['lr']
+        # Reduce LR if no improvement for `lr_scheduler_patience` epochs
+        scheduler.step(val_loss)
+
+        # Log learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        if current_lr != last_lr:
+            print(f"Epoch {epoch+1}: Learning Rate dropped to = {current_lr:.6e}")
+  
 
         # Early Stopping Check
         if val_loss < best_val_loss:
@@ -108,10 +125,10 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             print(f"Best model saved at {best_model_path} after epoch {epoch+1}")
         else:
             early_stopping_counter += 1
-            print(f"Early stopping patience: {early_stopping_counter}/{patience}")
+            print(f"Early stopping patience: {early_stopping_counter}/{early_stop_patience}")
 
         # If no improvement for `patience` epochs, stop training
-        if early_stopping_counter >= patience:
+        if early_stopping_counter >= early_stop_patience:
             print(f"Early stopping triggered after {epoch+1} epochs. Restoring best model.")
             model.load_state_dict(torch.load(best_model_path))  # Restore best model
             break  # Exit training loop
@@ -173,7 +190,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
             # Calculate loss
             loss = criterion(predicted_noise, actual_noise)
-            loss=loss / noise_scale * 10000
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)

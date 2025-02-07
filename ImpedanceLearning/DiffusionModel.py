@@ -37,7 +37,7 @@ def main():
     beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    patience = 600 #for early stopping
+    early_stop_patience = 30 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
 
@@ -118,7 +118,7 @@ def main():
         add_gaussian_noise,
         save_interval, 
         save_path,
-        patience)
+        early_stop_patience)
 
     #plot train losses
     # Ensure x-axis matches the number of recorded epochs
