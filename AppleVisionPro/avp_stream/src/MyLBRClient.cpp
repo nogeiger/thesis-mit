@@ -264,6 +264,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     // Transformation matrices of AVP
     H_rw_ini = Eigen::MatrixXd::Identity( 4, 4 );
+    R_rw_ini = Eigen::MatrixXd::Identity( 3, 3 );
     p_rw_ini = Eigen::VectorXd::Zero( 3 );
 
     matrix = new double[16];
@@ -449,8 +450,6 @@ void MyLBRClient::command()
     }
 
     double* trafo_vp;
-    Eigen::MatrixXd H_rw;
-    Eigen::VectorXd p_rw;
 
     // Lock mutex and update local variables from shared memory
     dataMutex.lock();
@@ -459,10 +458,14 @@ void MyLBRClient::command()
 
     dataMutex.unlock();
 
-    H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
-    p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
+    Eigen::MatrixXd H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
+    Eigen::MatrixXd R_rw = H_rw.transpose().block< 3, 3 >( 0, 0 );
+    Eigen::VectorXd p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
 
-    // ************************************************************
+    // ********************** HERE *************************
+    //Eigen::MatrixXd R_rw = H_rw.transpose().block< 3, 3 >( 0, 0 );
+
+    // ****************************************************matrix********
     // Get FTSensor data
 
     //f_sens_ee = ftSensor->Acquire();
@@ -514,6 +517,7 @@ void MyLBRClient::command()
         // ****************** GET INITIAL STREAM POSITION ******************
         H_rw_ini = H_rw;
         p_rw_ini = H_rw_ini.transpose().block< 3, 1 >( 0, 3 );
+        R_rw_ini = H_rw_ini.transpose().block< 3, 3 >( 0, 0 );
     }
 
     // ************************************************************
@@ -555,11 +559,18 @@ void MyLBRClient::command()
     Eigen::VectorXd p_0_4d = H_rel * p_vp_4d;
     Eigen::VectorXd p_0 = p_0_4d.block<3, 1>(0, 0);
 
-    // Rotations
-    Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
+    // ****************** ADAPT ROTATION ******************
+
+    // Comment out to keep initial robot configuration
+    //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
+
+    // Change rotation based on Apple Vision Pro
+    Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_rw_ini.transpose() * R_rw;
+
     Eigen::Quaterniond Q(R_ee_des);         // Transform to quaternions
     Q.normalize();
-    double theta = 2 * acos( Q.w() );
+
+    double theta = 2 * acos( Q.w() ) / 5.0;
 
     double eps = 0.01;
     if( theta <  0.01 ){
@@ -572,6 +583,8 @@ void MyLBRClient::command()
     u_ee[0] = norm_fact * Q.x();
     u_ee[1] = norm_fact * Q.y();
     u_ee[2] = norm_fact * Q.z();
+
+    Eigen::VectorXd u_0 = R * u_ee;
 
 
     // ************************************************************
@@ -588,8 +601,6 @@ void MyLBRClient::command()
 
     // Rotational impedance controler
     Eigen::VectorXd omega = J_w * dq;
-
-    Eigen::VectorXd u_0 = R * u_ee;
 
     Eigen::VectorXd tau_rotation = J_w.transpose() * ( Kr * u_0 * theta - Br * omega );
 

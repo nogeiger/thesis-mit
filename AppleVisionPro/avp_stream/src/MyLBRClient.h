@@ -181,6 +181,7 @@ private:
     Eigen::MatrixXd J_inv;
     
     Eigen::MatrixXd H_rw_ini;
+    Eigen::MatrixXd R_rw_ini;
     Eigen::MatrixXd p_rw_ini;
     Eigen::MatrixXd H_ini;
     Eigen::MatrixXd R_ini;
