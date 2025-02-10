@@ -170,8 +170,11 @@ private:
     
     Eigen::MatrixXd Kp;
     Eigen::MatrixXd Kr;
-    Eigen::MatrixXd Bp;
-    Eigen::MatrixXd Br;
+
+    // Damping will be calculated at runtime
+    // Comment out for constant damping!
+    // Eigen::MatrixXd Bp;
+    // Eigen::MatrixXd Br;
     
 
     // Force-Torque Sensor
@@ -197,8 +200,8 @@ private:
 
 
     // Damping design
-    double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor = 0.7);
-    Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd M, const Eigen::MatrixXd J_3D, double k = 0.01);
+    double compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor);
+    Eigen::Matrix3d getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J_3D, double k);
 
 
     // Files to store data

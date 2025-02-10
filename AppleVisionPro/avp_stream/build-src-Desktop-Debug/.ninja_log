@@ -1,0 +1,13 @@
+# ninja log v5
+0	2824	1739225932624299644	CMakeFiles/avp_stream.dir/MyLBRApp.cpp.o	29de6ced94517ddb
+2	8443	1739226324121328308	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+2	2834	1739226475410556175	CMakeFiles/avp_stream.dir/MyLBRApp.cpp.o	29de6ced94517ddb
+3	8492	1739226496385420618	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+2	2850	1739226862609542051	CMakeFiles/avp_stream.dir/MyLBRApp.cpp.o	29de6ced94517ddb
+3	8302	1739226959078531759	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+3	8380	1739227140700047921	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+8380	8699	1739227141031061624	/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build/Debug/avp_stream	fa512230b0ce2f3
+3	8515	1739227191381146185	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+8515	8841	1739227191720160222	/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build/Debug/avp_stream	fa512230b0ce2f3
+2	8278	1739227320381488358	CMakeFiles/avp_stream.dir/MyLBRClient.cpp.o	ecc9bdfc01cd2626
+8278	8605	1739227320720502400	/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build/Debug/avp_stream	fa512230b0ce2f3

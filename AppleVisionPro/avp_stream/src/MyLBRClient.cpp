@@ -150,17 +150,20 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     J = Eigen::MatrixXd::Zero( 6, myLBR->nq );
 
-    // Translational impedances
+    // Translational stiffness
     Kp = Eigen::MatrixXd::Identity( 3, 3 );
     Kp = 400 * Kp;
-    Bp = Eigen::MatrixXd::Identity( 3, 3 );
-    Bp = 40 * Bp;
 
-    // Rotational impedances
+    // Rotational stiffness
     Kr = Eigen::MatrixXd::Identity( 3, 3 );
     Kr = 150 * Kr;
-    Br = Eigen::MatrixXd::Identity( 3, 3 );
-    Br = 15 * Br;
+
+    // Damping will be calculated at runtime
+    // Comment out for constant damping!
+    // Bp = Eigen::MatrixXd::Identity( 3, 3 );
+    // Bp = 40 * Bp;
+    // Br = Eigen::MatrixXd::Identity( 3, 3 );
+    // Br = 15 * Br;
 
     // ************************************************************
     // AVP streamer
@@ -447,6 +450,11 @@ void MyLBRClient::command()
     M = myLBR->getMassMatrix( q );
     M( 6, 6 ) = 40 * M( 6, 6 );
 
+    // Cartesian mass matrix
+    double k = 0.01;
+    Eigen::Matrix3d Lambda_v = getLambdaLeastSquares(M, J_v, k);
+    Eigen::Matrix3d Lambda_w = getLambdaLeastSquares(M, J_w, k);
+
     // ****************** Convert AVP displacement to robot coordinates ******************
 
     // Displacement from initial position
@@ -503,30 +511,16 @@ void MyLBRClient::command()
 
 
     // ************************************************************
-    // Control torque
+    // Translational task-space impedance controller
 
-    // Translational Cartesian impedance controller
     Eigen::VectorXd dx = J_v * dq;
-
     Eigen::VectorXd del_p = (p_0 - p);
 
-    
-    // TODO: CHECK DAMPINGN DESIGN
-    // ***************************
-    
- 
-    // Lambda least squares (**TODO** move up to Mass Matrix)
-    Eigen::Matrix3d Lambda = getLambdaLeastSquares(M, J_v);
-
-    double alpha = compute_alpha(Lambda, Kp.diagonal());
-    Eigen::MatrixXd Bp_test = alpha * Kp; 
-
-    cout << "Bp_test: " << endl;
-    cout << Bp_test << endl;
-
-    // ***************************
-    // TODO: CHECK DAMPINGN DESIGN
-
+    // Damping design
+    double damping_factor_v = 0.7;
+    Eigen::Vector3d Kp_diag = Kp.diagonal();
+    double alpha_v = compute_alpha(Lambda_v, Kp_diag, damping_factor_v);
+    Eigen::MatrixXd Bp = alpha_v * Kp;
 
     // Calculate force
     Eigen::VectorXd f = Kp * del_p - Bp * dx;
@@ -534,11 +528,36 @@ void MyLBRClient::command()
     // Convert to torques
     Eigen::VectorXd tau_translation = J_v.transpose() * f;
 
-    // Rotational impedance controler
+
+    // ************************************************************
+    // Rotational task-space impedance controler
+
     Eigen::VectorXd omega = J_w * dq;
 
-    Eigen::VectorXd tau_rotation = J_w.transpose() * ( Kr * u_0 * theta - Br * omega );
 
+    // *********************************************************************
+    // ********************         TO CHECK        ************************
+    // *********************************************************************
+
+    // Damping design
+    double damping_factor_r = 0.7;
+    Eigen::Vector3d Kr_diag = Kr.diagonal();
+    double alpha_w = compute_alpha(Lambda_w, Kr_diag, damping_factor_r);
+    Eigen::MatrixXd Br = alpha_w * Kr;
+
+    // *********************************************************************
+    // ********************         TO CHECK        ************************
+    // *********************************************************************
+
+
+    // Calculate moment
+    Eigen::VectorXd m = Kr * u_0 * theta - Br * omega;
+
+    // Convert to torques
+    Eigen::VectorXd tau_rotation = J_w.transpose() * m;
+
+
+    // ************************************************************
     // Control torque
     tau_motion = tau_translation + tau_rotation;
 
@@ -715,14 +734,20 @@ void MyLBRClient::forceSensorThread()
 * \brief Function to compute damping factor, applied to stiffness matrix
 *
 */
-double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor = 0.7)
+double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor)
 {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(Lambda);
     Eigen::Matrix3d U = solver.eigenvectors();
     Eigen::Matrix3d Sigma = solver.eigenvalues().asDiagonal();
 
+    for(int i=0; i<3; i++)
+    {
+        Sigma(i,i) = std::sqrt(Sigma(i,i));
+    }
+
     // Compute sqrt(Lambda)
-    Eigen::Matrix3d sqrt_Lambda = U * Sigma.array().sqrt().matrix().asDiagonal() * U.transpose();
+    //Eigen::Matrix3d sqrt_Lambda = U * Sigma.array().sqrt().matrix() * U.transpose();
+    Eigen::Matrix3d sqrt_Lambda = U * Sigma * U.transpose();
 
     // Convert k_t to a diagonal matrix
     Eigen::Matrix3d sqrt_k_t = k_t.array().sqrt().matrix().asDiagonal();
@@ -741,10 +766,10 @@ double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, 
 * \brief Function to compute damping factor, applied to stiffness matrix
 *
 */
-Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd M, const Eigen::MatrixXd J_3D, double k = 0.01)
+Eigen::Matrix3d MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J_3D, double k)
 {
 
-    Eigen::Matrix3d Lambda_Inv = J_3D * M.inverse() * J_3D.transpose() + ( k * k ) * MatrixNd::Identity( 3, 3 );
+    Eigen::Matrix3d Lambda_Inv = J_3D * M.inverse() * J_3D.transpose() + ( k * k ) * Eigen::MatrixXd::Identity( 3, 3 );
     Eigen::Matrix3d Lambda = Lambda_Inv.inverse();
     return Lambda;
 
