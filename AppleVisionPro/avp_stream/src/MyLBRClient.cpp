@@ -481,6 +481,11 @@ void MyLBRClient::command()
     //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
 
     // Change rotation based on Apple Vision Pro
+    
+    // TODO: CHECK THIS!!!
+    // R_rw_ini = R_z * R_rw_ini;
+    // R_rw = R_z * R_rw;
+    
     Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_rw_ini.transpose() * R_rw;
 
     // Transform rotations to quaternions
