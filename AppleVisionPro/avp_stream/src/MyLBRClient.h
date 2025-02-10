@@ -197,10 +197,11 @@ private:
 
 
     // Damping design
-    double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor);
-    Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd& M, const Eigen::MatrixXd& J_3D);
+    double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor = 0.7);
+    Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd M, const Eigen::MatrixXd J_3D, double k = 0.01);
 
-    // files
+
+    // Files to store data
     std::ostringstream buffer;
     std::ofstream File_data;
 

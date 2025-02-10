@@ -514,16 +514,12 @@ void MyLBRClient::command()
     // TODO: CHECK DAMPINGN DESIGN
     // ***************************
     
-    // Extract diagonal as Vector3d
-    Eigen::Vector3d Kp_diag = Kp.diagonal();
-
-    // Lambda least squares
+ 
+    // Lambda least squares (**TODO** move up to Mass Matrix)
     Eigen::Matrix3d Lambda = getLambdaLeastSquares(M, J_v);
 
-    double alpha = compute_alpha(Lambda, Kp_diag);
-
-    Eigen::MatrixXd Bp_test = Eigen::MatrixXd::Identity( 3, 3 );
-    Bp_test = alpha * Kp;
+    double alpha = compute_alpha(Lambda, Kp.diagonal());
+    Eigen::MatrixXd Bp_test = alpha * Kp; 
 
     cout << "Bp_test: " << endl;
     cout << Bp_test << endl;
@@ -753,6 +749,9 @@ Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd M, const Eigen::Matr
     return Lambda;
 
 }
+
+
+
 
 
 
