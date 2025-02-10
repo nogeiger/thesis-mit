@@ -81,103 +81,16 @@ static double filterOutput[7][NCoef + 1];
 static double filterInput[7][NCoef + 1];
 
 
-//******************************************************************************
-void MyLBRClient::runStreamerThread() {
-    try {
-        // Create or open shared memory
-        boost::interprocess::shared_memory_object shm(
-            boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
-
-        // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
-        shm.truncate(16 * sizeof(double) + sizeof(int64_t));
-
-        // Map the shared memory
-        boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
-
-        // Define pointers based on shared memory layout
-        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
-        double* matrix_data = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-
-        // Wait for Python to initialize
-        while (*ready_flag == -1) {
-            std::cout << "Waiting for Python to initialize..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-
-        std::cout << "Python initialized. Starting processing..." << std::endl;
-
-        int timeout_counter = 0;
-        while (true) {
-            if (*ready_flag == 1) {  // Check if Python has written new data
-
-                // Be carful, Johannes was there
-                dataMutex.lock();
-
-                matrix = matrix_data;
-
-                dataMutex.unlock();
-
-                // Reset the flag
-                *ready_flag = 0;
-                //                std::cout << "C++ reset Ready flag to: " << *ready_flag << std::endl;
-                timeout_counter = 0;  // Reset the timeout counter
-            } else {
-                timeout_counter++;
-            }
-
-            if (timeout_counter > 1000) {  // If nothing changes for a while
-                //                std::cout << "No updates from Python detected, continuing..." << std::endl;
-                timeout_counter = 0;  // Reset timeout to avoid permanent stop
-            }
-
-            // Sleep briefly
-            //std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-
-    } catch (const std::exception& e) {
-        std::cerr << "Error in shared memory operation: " << e.what() << std::endl;
-    }
-}
-
-
-
-//******************************************************************************
-// Start Python Script
-void MyLBRClient::startPythonScript() {
-    boost::thread pythonThread([]() {
-        const std::string pythonScriptPath = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/VisionProCppCommunication.py";
-        //const std::string pythonScriptPath = "/../VisionProCppCommunication.py";
-        const std::string pythonCommand = "python3 " + pythonScriptPath;
-
-        int retCode = system(pythonCommand.c_str());
-        if (retCode != 0) {
-            std::cerr << "Error: Python script failed with return code " << retCode << std::endl;
-        } else {
-            std::cout << "Python script executed successfully." << std::endl;
-        }
-    });
-    pythonThread.detach(); // Detach thread to run independently
-}
-
-
-//******************************************************************************
-//MyLBRClient::MyLBRClient(double freqHz, double amplitude){
-
+/**
+* \brief Initialization
+*
+*/
 MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     :guard{} // Initialize guard (Python interpreter)
 {
 
     /** Initialization */
-
     // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    //    qInitial[0] = 12.58 * M_PI/180;
-    //    qInitial[1] = 40.27 * M_PI/180;
-    //    qInitial[2] = -0.01 * M_PI/180;
-    //    qInitial[3] = -99.70 * M_PI/180;
-    //    qInitial[4] = -0.01 * M_PI/180;
-    //    qInitial[5] = 40.03 * M_PI/180;
-    //    qInitial[6] = 12.59 * M_PI/180;
-
     qInitial[0] = -8.87 * M_PI/180;
     qInitial[1] = 60.98 * M_PI/180;
     qInitial[2] = 17.51 * M_PI/180;
@@ -197,7 +110,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Time variables for control loop
     currentTime = 0;
     sampleTime = 0;
-    t_pressed = 0;      // Time after the button push
 
     // Initialize joint torques and joint positions (also needed for waitForCommand()!)
     for( int i=0; i < myLBR->nq; i++ )
@@ -224,7 +136,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     bodyIndex = 7;
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
-    R_ee_i = Eigen::Matrix3d::Zero( 3, 3 );
 
     R_z <<  0.0, -1.0,  0.0,
         1.0, 0.0,  0.0,
@@ -249,7 +160,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     Kr = Eigen::MatrixXd::Identity( 3, 3 );
     Kr = 150 * Kr;
     Br = Eigen::MatrixXd::Identity( 3, 3 );
-    Br = 8 * Br;
+    Br = 15 * Br;
 
     // ************************************************************
     // AVP streamer
@@ -279,7 +190,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
         std::cerr << "Error opening file for writing!" << std::endl;
     }
 
-
     // ************************************************************
     // INCLUDE FT-SENSOR
     // ************************************************************
@@ -292,8 +202,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     F_ext_0 = Eigen::VectorXd::Zero( 6 );
 
     AtiForceTorqueSensor ftSensor("172.31.1.1");
-    mutexFTS.unlock();
+    
     // Start threading for force sensor
+    mutexFTS.unlock();
     boost::thread(&MyLBRClient::forceSensorThread, this).detach();
 
     printf( "Sensor Activated. \n\n" );
@@ -449,26 +360,23 @@ void MyLBRClient::command()
         startPythonScript();
     }
 
+    // Lock mutex and update local variables from shared memory
     double* trafo_vp;
 
-    // Lock mutex and update local variables from shared memory
     dataMutex.lock();
 
     trafo_vp = matrix;
 
     dataMutex.unlock();
 
+    // Convert APV transformation to Eigen
     Eigen::MatrixXd H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
     Eigen::MatrixXd R_rw = H_rw.transpose().block< 3, 3 >( 0, 0 );
     Eigen::VectorXd p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
 
-    // ********************** HERE *************************
-    //Eigen::MatrixXd R_rw = H_rw.transpose().block< 3, 3 >( 0, 0 );
 
     // ****************************************************matrix********
     // Get FTSensor data
-
-    //f_sens_ee = ftSensor->Acquire();
     double* fts_bt;
 
     mutexFTS.lock();
@@ -484,10 +392,9 @@ void MyLBRClient::command()
     m_ext_ee[1] = fts_bt[4];
     m_ext_ee[2] = fts_bt[5];
 
+    // Convert to robot base coordinates
     f_ext_0 = R * f_ext_ee;
     m_ext_0 = R * m_ext_ee;
-
-    //cout << "f_ext_0: " << f_ext_0 << endl;
 
 
     // ************************************************************
@@ -514,7 +421,7 @@ void MyLBRClient::command()
         R_ini = H_ini.block< 3, 3 >( 0, 0 );
         p_ini = H_ini.block< 3, 1 >( 0, 3 );
 
-        // ****************** GET INITIAL STREAM POSITION ******************
+        // Get initial AVP transformation
         H_rw_ini = H_rw;
         p_rw_ini = H_rw_ini.transpose().block< 3, 1 >( 0, 3 );
         R_rw_ini = H_rw_ini.transpose().block< 3, 3 >( 0, 0 );
@@ -535,14 +442,14 @@ void MyLBRClient::command()
     Eigen::MatrixXd J_v = J.block(0, 0, 3, 7);
     Eigen::MatrixXd J_w = J.block(3, 0, 3, 7);
 
+    // Mass matrix
     // Adapt mass matrix to prevent high accelerations at last joint
     M = myLBR->getMassMatrix( q );
     M( 6, 6 ) = 40 * M( 6, 6 );
-    M_inv = this->M.inverse();
 
-    // ****************** ADAPT POSITION DIFFERENCE ******************
+    // ****************** Convert AVP displacement to robot coordinates ******************
 
-    // Proceed with your control logic using H_rw and p_rw
+    // Displacement from initial position
     Eigen::VectorXd p_vp_3d = p_rw - p_rw_ini;
 
     // Transform to homogeneous coordinates
@@ -550,7 +457,7 @@ void MyLBRClient::command()
     p_vp_4d[3] = 1;
     p_vp_4d.head<3>() = p_vp_3d;
 
-    // Transformation to spatail robot coordinates
+    // Transformation to robot base coordinates
     Eigen::MatrixXd H_rel = Eigen::MatrixXd::Zero( 4, 4 );
     H_rel.block<3, 3>(0, 0) = R_z;
     H_rel.block<3, 1>(0, 3) = p_ini;
@@ -559,7 +466,8 @@ void MyLBRClient::command()
     Eigen::VectorXd p_0_4d = H_rel * p_vp_4d;
     Eigen::VectorXd p_0 = p_0_4d.block<3, 1>(0, 0);
 
-    // ****************** ADAPT ROTATION ******************
+
+    // ****************** Convert AVP rotation to robot coordinates ******************
 
     // Comment out to keep initial robot configuration
     //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
@@ -567,16 +475,22 @@ void MyLBRClient::command()
     // Change rotation based on Apple Vision Pro
     Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_rw_ini.transpose() * R_rw;
 
-    Eigen::Quaterniond Q(R_ee_des);         // Transform to quaternions
+    // Transform rotations to quaternions
+    Eigen::Quaterniond Q(R_ee_des);         
     Q.normalize();
 
-    double theta = 2 * acos( Q.w() ) / 5.0;
-
+    // Extract rotation angle
+    double theta = 2 * acos( Q.w() );
     double eps = 0.01;
     if( theta <  0.01 ){
         theta = theta + eps;
     }
 
+    // Scale desired angle
+    int scaleFact = 5.0;
+    theta = theta / scaleFact;
+
+    // Extract unit rotation axis 
     double norm_fact = 1 / sin( theta/2 );
 
     Eigen::VectorXd u_ee = Eigen::VectorXd::Zero( 3, 1 );
@@ -584,6 +498,7 @@ void MyLBRClient::command()
     u_ee[1] = norm_fact * Q.y();
     u_ee[2] = norm_fact * Q.z();
 
+    // Transform to robot base coordinates
     Eigen::VectorXd u_0 = R * u_ee;
 
 
@@ -595,8 +510,32 @@ void MyLBRClient::command()
 
     Eigen::VectorXd del_p = (p_0 - p);
 
+    
+    // TODO: CHECK DAMPINGN DESIGN
+    // ***************************
+    
+    // Extract diagonal as Vector3d
+    Eigen::Vector3d Kp_diag = Kp.diagonal();
+
+    // Lambda least squares
+    Eigen::Matrix3d Lambda = getLambdaLeastSquares(M, J_v);
+
+    double alpha = compute_alpha(Lambda, Kp_diag);
+
+    Eigen::MatrixXd Bp_test = Eigen::MatrixXd::Identity( 3, 3 );
+    Bp_test = alpha * Kp;
+
+    cout << "Bp_test: " << endl;
+    cout << Bp_test << endl;
+
+    // ***************************
+    // TODO: CHECK DAMPINGN DESIGN
+
+
+    // Calculate force
     Eigen::VectorXd f = Kp * del_p - Bp * dx;
 
+    // Convert to torques
     Eigen::VectorXd tau_translation = J_v.transpose() * f;
 
     // Rotational impedance controler
@@ -607,7 +546,7 @@ void MyLBRClient::command()
     // Control torque
     tau_motion = tau_translation + tau_rotation;
 
-    // Just gravity compensation
+    // Comment out for only gravity compensation
     //    tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
 
     // Include joint limits
@@ -615,7 +554,30 @@ void MyLBRClient::command()
 
 
     // ************************************************************
-    // YOUR CODE ENDS HERE!
+    // Write data in a file 
+
+    if( currentTime < sampleTime )
+    {
+        //TODO
+    }
+
+    // Buffer binary data
+    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
+    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
+    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+
+    // Periodic flush to file (e.g., every 1000 iterations)
+    if (buffer.str().size() > 4096) { // Write every 4KB of data
+        File_data.write(buffer.str().c_str(), buffer.str().size());
+        buffer.str("");  // Clear buffer
+        buffer.clear();
+    }
+
+
+    // ************************************************************
+    // YOUR CODE ENDS HERE
     // ************************************************************
 
     // A simple filter for the torque command
@@ -646,35 +608,95 @@ void MyLBRClient::command()
     tau_previous = tau_motion;
     tau_prev_prev = tau_previous;
 
-    // Print stuff (later if needed)
-    if( currentTime < sampleTime )
-    {
-
-        //TODO
-
-    }
-
-    // Buffer binary data
-    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
-    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
-    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
-    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
-    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
-
-    // Periodic flush to file (e.g., every 1000 iterations)
-    if (buffer.str().size() > 4096) { // Write every 4KB of data
-        File_data.write(buffer.str().c_str(), buffer.str().size());
-        buffer.str("");  // Clear buffer
-        buffer.clear();
-    }
-
-
     currentTime = currentTime + sampleTime;
 
 }
 
 
-//******************************************************************************
+/**
+* \brief Streamer Thread that polls the Vision Pro data and passes it to the command() loop
+*
+*/
+void MyLBRClient::runStreamerThread() {
+    try {
+        // Create or open shared memory
+        boost::interprocess::shared_memory_object shm(
+            boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
+
+        // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
+        shm.truncate(16 * sizeof(double) + sizeof(int64_t));
+
+        // Map the shared memory
+        boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
+
+        // Define pointers based on shared memory layout
+        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
+        double* matrix_data = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+
+        // Wait for Python to initialize
+        while (*ready_flag == -1) {
+            std::cout << "Waiting for Python to initialize..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        std::cout << "Python initialized. Starting processing..." << std::endl;
+
+        int timeout_counter = 0;
+        while (true) {
+            if (*ready_flag == 1) {  // Check if Python has written new data
+
+                // Be carful, Johannes was there
+                dataMutex.lock();
+
+                matrix = matrix_data;
+
+                dataMutex.unlock();
+
+                // Reset the flag
+                *ready_flag = 0;
+                timeout_counter = 0;  // Reset the timeout counter
+            } else {
+                timeout_counter++;
+            }
+
+            if (timeout_counter > 1000) {  // If nothing changes for a while
+                timeout_counter = 0;  // Reset timeout to avoid permanent stop
+            }
+
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error in shared memory operation: " << e.what() << std::endl;
+    }
+}
+
+
+
+/**
+* \brief Opens and runs the python script, stored locally
+*
+*/
+void MyLBRClient::startPythonScript() {
+    boost::thread pythonThread([]() {
+        const std::string pythonScriptPath = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/VisionProCppCommunication.py";
+        //const std::string pythonScriptPath = "/../VisionProCppCommunication.py";
+        const std::string pythonCommand = "python3 " + pythonScriptPath;
+
+        int retCode = system(pythonCommand.c_str());
+        if (retCode != 0) {
+            std::cerr << "Error: Python script failed with return code " << retCode << std::endl;
+        } else {
+            std::cout << "Python script executed successfully." << std::endl;
+        }
+    });
+    pythonThread.detach(); // Detach thread to run independently
+}
+
+
+/**
+* \brief Thread that polls the force sensor data and passes it to the command() loop
+*
+*/
 void MyLBRClient::forceSensorThread()
 {
     while(true){
@@ -691,6 +713,49 @@ void MyLBRClient::forceSensorThread()
 
     }
 }
+
+
+/**
+* \brief Function to compute damping factor, applied to stiffness matrix
+*
+*/
+double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor = 0.7)
+{
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(Lambda);
+    Eigen::Matrix3d U = solver.eigenvectors();
+    Eigen::Matrix3d Sigma = solver.eigenvalues().asDiagonal();
+
+    // Compute sqrt(Lambda)
+    Eigen::Matrix3d sqrt_Lambda = U * Sigma.array().sqrt().matrix().asDiagonal() * U.transpose();
+
+    // Convert k_t to a diagonal matrix
+    Eigen::Matrix3d sqrt_k_t = k_t.array().sqrt().matrix().asDiagonal();
+
+    // Compute b_t
+    Eigen::Matrix3d D = Eigen::Matrix3d::Identity() * damping_factor;
+    Eigen::Matrix3d b_t = sqrt_Lambda * D * sqrt_k_t + sqrt_k_t * D * sqrt_Lambda;
+
+    // Compute alpha
+    double alpha = (2.0 * b_t.trace()) / k_t.sum();
+    return alpha;
+}
+
+
+/**
+* \brief Function to compute damping factor, applied to stiffness matrix
+*
+*/
+Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd M, const Eigen::MatrixXd J_3D, double k = 0.01)
+{
+
+    Eigen::Matrix3d Lambda_Inv = J_3D * M.inverse() * J_3D.transpose() + ( k * k ) * MatrixNd::Identity( 3, 3 );
+    Eigen::Matrix3d Lambda = Lambda_Inv.inverse();
+    return Lambda;
+
+}
+
+
+
 
 
 

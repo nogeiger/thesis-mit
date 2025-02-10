@@ -115,7 +115,6 @@ private:
 
     void runStreamerThread();
     void startPythonScript();
-    void forceSensorThread();
 
     double* matrix;
 
@@ -133,23 +132,9 @@ private:
     double dq_arr[7];
     double tauExternal[7];
 
-
     // Time parameters for control loop
     double sampleTime;
     double currentTime;
-    double t_pressed;
-
-    int N_data;
-    int N_curr;
-    int n_step;
-
-    Eigen::MatrixXd q_data;
-    Eigen::MatrixXd dx_data;
-    Eigen::VectorXd q_init0;
-    Eigen::VectorXd q_init1;
-
-    bool is_pressed;
-
 
     // Choose the body you want to control and the position on this body
     signed int bodyIndex;
@@ -158,17 +143,12 @@ private:
     // Current position and velocity as Eigen vector
     Eigen::VectorXd q;
     Eigen::VectorXd dq;
-    Eigen::VectorXd dq_0;
-    Eigen::VectorXd tauExt;
 
     // Command torque vectors (with and without constraints)
     Eigen::VectorXd tau_motion;
     Eigen::VectorXd tau_previous;
     Eigen::VectorXd tau_prev_prev;
     Eigen::VectorXd tau_total;
-    Eigen::VectorXd tauExt_previous;
-    Eigen::VectorXd tauExt_prev_prev;
-    Eigen::VectorXd tauExt_filtered;
 
     // DECLARE VARIABLES FOR YOUR CONTROLLER HERE!!!
     Eigen::MatrixXd M;
@@ -176,9 +156,7 @@ private:
     Eigen::MatrixXd H;
     Eigen::MatrixXd R;
     Eigen::Matrix3d R_z;
-    Eigen::Matrix3d R_ee_i;
     Eigen::MatrixXd J;
-    Eigen::MatrixXd J_inv;
     
     Eigen::MatrixXd H_rw_ini;
     Eigen::MatrixXd R_rw_ini;
@@ -194,12 +172,8 @@ private:
     Eigen::MatrixXd Kr;
     Eigen::MatrixXd Bp;
     Eigen::MatrixXd Br;
-
-    Eigen::VectorXd addConstraints(Eigen::VectorXd tauStack, double dt);
-    double getMaxValue(Eigen::VectorXd myVector);
-    double getMinValue(Eigen::VectorXd myVector);
-
     
+
     // Force-Torque Sensor
     AtiForceTorqueSensor *ftSensor;
     double* f_sens_ee;
@@ -210,21 +184,25 @@ private:
     Eigen::VectorXd m_ext_0;
     Eigen::VectorXd F_ext_0;
 
+    void forceSensorThread();
+
     boost::thread ftsThread;
     boost::mutex mutexFTS;
+
+
+    // Joint limit avoidance
+    Eigen::VectorXd addConstraints(Eigen::VectorXd tauStack, double dt);
+    double getMaxValue(Eigen::VectorXd myVector);
+    double getMinValue(Eigen::VectorXd myVector);
+
+
+    // Damping design
+    double compute_alpha(const Eigen::Matrix3d& Lambda, const Eigen::Vector3d& k_t, double damping_factor);
+    Eigen::Matrix3d getLambdaLeastSquares(const Eigen::MatrixXd& M, const Eigen::MatrixXd& J_3D);
 
     // files
     std::ostringstream buffer;
     std::ofstream File_data;
-    
-    std::vector<double> timestamps;
-    std::vector<Eigen::VectorXd> positions;
-    std::vector<Eigen::Matrix3d> rotations;
-    
-    int step;
-
-
-
 
 
 };
