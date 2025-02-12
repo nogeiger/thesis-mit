@@ -24,6 +24,8 @@ class NoisePredictorInitial(nn.Module):
         if self.use_forces:
             input_dim += seq_length * 3  # Add forces (force_x, force_y, force_z)
 
+        #input_dim+= 1 #for time step t 
+
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
@@ -35,7 +37,9 @@ class NoisePredictorInitial(nn.Module):
         self.output_layer = nn.Linear(hidden_dim, seq_length * 3)  # Output clean trajectory (pos_0)
         self.relu = nn.ReLU()
 
-    def forward(self, noisy_trajectory, forces=None):
+
+
+    def forward(self, noisy_trajectory, t, forces=None):
         """
         Forward pass to predict clean 3D trajectory.
 
@@ -54,7 +58,17 @@ class NoisePredictorInitial(nn.Module):
         else:
             x = noisy_trajectory
 
+        
+        # Expand t to match the feature dimension of x
+        #t = t.unsqueeze(-1).float()  # [batch_size, 1]
+        #t_expanded = t.repeat(1, x.shape[1])  # Repeat t along the feature dimension [batch_size, input_dim]
+
+        #print("t_expanded shape",t_expanded.shape,"x shape", x.shape)
+        # Concatenate t with other inputs
+        #x = torch.cat((x, t_expanded), dim=-1)  # [batch_size, input_dim + 1]
+
         x = x.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 6] if forces are included
+        # Pass through the network
         x = self.input_layer(x)
         x = self.relu(x)
         x = self.hidden_layer_1(x)
@@ -66,6 +80,7 @@ class NoisePredictorInitial(nn.Module):
         x = self.hidden_layer_4(x)
         x = self.relu(x)
         predicted_noise = self.output_layer(x)
+
         return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
 
 

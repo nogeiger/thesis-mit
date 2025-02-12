@@ -63,7 +63,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory, noise_scale = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
+            noisy_trajectory, noise_scale, t = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
                                          beta_end, noise_with_force, add_gaussian_noise)
             
             # Compute the max noise (actual noise) based on the flag
@@ -75,11 +75,13 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
             optimizer.zero_grad()
 
+            # Convert t to a PyTorch tensor
+            t = torch.tensor([t], device=device).float()
             # Predict the noise from the noisy trajectory
             if use_forces:
-                predicted_noise = model(noisy_trajectory, force)
+                predicted_noise = model(noisy_trajectory, t, force)
             else:
-                predicted_noise = model(noisy_trajectory)
+                predicted_noise = model(noisy_trajectory, t)
 
             # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
@@ -172,7 +174,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             force = force.to(device)
 
             # Dynamically add noise
-            noisy_trajectory, noise_scale = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
+            noisy_trajectory, noise_scale, t  = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
                                          beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
             # Compute the max noise (actual noise) based on the flag
@@ -183,11 +185,14 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 actual_noise = noisy_trajectory - clean_trajectory  # Default: noise is the diff
 
 
+
+            # Convert t to a PyTorch tensor
+            t = torch.tensor([t], device=device).float()
             # Predict the noise from the noisy trajectory
             if use_forces:
-                predicted_noise = model(noisy_trajectory, force)
+                predicted_noise = model(noisy_trajectory, t, force)
             else:
-                predicted_noise = model(noisy_trajectory)
+                predicted_noise = model(noisy_trajectory, t)
 
             # Calculate loss
             loss = criterion(predicted_noise, actual_noise)
@@ -237,8 +242,16 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
 
         # Start iterative denoising
         denoised_trajectory = noisy_trajectory.clone()
-        for _ in range(num_denoising_steps):
-            predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
+
+        for step in range(num_denoising_steps):
+            # Compute the timestep t for the current denoising step
+            t = torch.tensor([num_denoising_steps - step - 1], device=device)  # Generate time step t
+
+            # Predict noise and perform denoising
+            if use_forces:
+                predicted_noise = model(denoised_trajectory, t, force)
+            else:
+                predicted_noise = model(denoised_trajectory, t)
             denoised_trajectory = denoised_trajectory - predicted_noise  # Remove noise iteratively
 
         # Denormalize trajectories
