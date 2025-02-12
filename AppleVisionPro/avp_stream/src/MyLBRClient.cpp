@@ -180,6 +180,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     R_avp_11_ini = Eigen::MatrixXd::Identity( 3, 3 );
     p_avp_11_ini = Eigen::VectorXd::Zero( 3 );
 
+    // # definitions can be found here: https://github.com/Improbable-AI/VisionProTeleop
     matrix_25 = new double[16];                     // wrist
     matrix_10 = new double[16];                     // finger metacarpal
     matrix_11 = new double[16];                     // finger knuckle
