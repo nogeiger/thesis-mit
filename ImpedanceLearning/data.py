@@ -148,7 +148,7 @@ def generate_data(num_samples=10000, seq_length=100):
     return data
 
 
-def load_robot_data(folder_path, seq_length):
+def load_robot_data(folder_path, seq_length, use_overlap=True):
     """
     Loads real trajectory data from all text files in a folder and formats it like the generated data.
 
@@ -160,6 +160,8 @@ def load_robot_data(folder_path, seq_length):
         list: A combined list of dictionaries, each containing 'pos_0' with shape [seq_length, 3] and 'force' with shape [seq_length, 3].
     """
     all_data = []
+     # Set stride based on flag
+    stride = 10 if use_overlap else seq_length  # Overlapping = stride 10, Non-overlapping = full seq length
 
     # Iterate over all text files in the folder
     for filename in os.listdir(folder_path):
@@ -185,7 +187,8 @@ def load_robot_data(folder_path, seq_length):
                 file_data = []  # Temporary storage for data from the current file
 
                 # Extract clean trajectories for x, y, z and stack them
-                for i in range(0, len(df) - seq_length + 1, seq_length):
+                #for i in range(0, len(df) - seq_length + 1, seq_length):
+                for i in range(0, len(df) - seq_length + 1, stride):  #overlapping slicing with stride 10
                     clean_trajectory = np.stack([
                         df["Pos_0_x"].iloc[i:i + seq_length].values,
                         df["Pos_0_y"].iloc[i:i + seq_length].values,
@@ -295,6 +298,10 @@ class ImpedanceDatasetDiffusion(Dataset):
             elif trajectory_type == "pos":  # Use noisy trajectory statistics
                 min_vals = self.stats["min_pos"]
                 max_vals = self.stats["max_pos"]
+            elif trajectory_type == "force":  # Use noisy trajectory statistics
+                min_vals = self.stats["min_force"]
+                max_vals = self.stats["max_force"]
+        
             else:
                 raise ValueError("Invalid trajectory type. Must be 'pos_0' or 'pos'.")
 

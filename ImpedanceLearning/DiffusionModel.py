@@ -7,12 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
-from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorLSTMWithAttention, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConvLSTM, NoisePredictorConv1D, NoisePredictorHybrid, NoisePredictorTCN
+from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
-
-
 
 
 def main():
@@ -20,12 +18,12 @@ def main():
     Main function to execute the training and validation of the NoisePredictor model.
     """ 
     
-    # Hyperparameters
-    seq_length = 256 #seq len of data
+    # Definition of parameters
+    seq_length = 32 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 128 #hidden dim of the model
-    batch_size = 32 #batch size
-    num_epochs = 100 #number of epochs
+    hidden_dim = 512#512(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
+    batch_size = 64 #batch size
+    num_epochs = 500 #number of epochs
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -33,18 +31,19 @@ def main():
     #if force is used as noise, then force should not be used as input
     if noise_with_force:
             use_forces = False
-    beta_start = 0.00001 #for the noise diffusion model
-    beta_end = 0.00025 #for the noise diffusion model
+    beta_start = 0.0001 #for the noise diffusion model
+    beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
+    early_stop_patience = 50 #for early stopping
+    save_interval = 20
+    save_path = "save_checkpoints"
 
     # File path to the real data
-    file_path = "Data/1D_diffusion_large_data"
-
-    print("max noise factor per batch and step: ",calculate_max_noise_factor(beta_start,beta_end,noiseadding_steps))
+    file_path = "Data/1D_diffusion_large_multiple"
 
     # Load real data
-    data = load_robot_data(file_path, seq_length)
+    data = load_robot_data(file_path, seq_length, use_overlap=False)
     
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
@@ -52,40 +51,59 @@ def main():
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
 
-    # Split into training and validation sets
-    split = int(len(normalized_data) * 0.8)
-    train_data = normalized_data[:split]
-    val_data = normalized_data[split:]
+    # Define split ratios
+    train_ratio = 0.7 
+    val_ratio = 0.2  
+
+    # Compute split indices
+    total_size = len(normalized_data)
+    train_split = int(total_size * train_ratio)
+    val_split = train_split + int(total_size * val_ratio)
+
+    # Split data
+    train_data = normalized_data[:train_split]
+    val_data = normalized_data[train_split:val_split]
+    test_data = normalized_data[val_split:]
 
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
-
+    test_dataset = ImpedanceDatasetDiffusion(test_data, stats)
+    
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    print(f"Total sequences loaded: {len(test_dataset)} for training, {len(test_dataset)} for validation.")
+    print(f"Total batches per epoch: {len(test_loader)} (Expected: {len(test_dataset) // 64})")
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorConvLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    #criterion = nn.MSELoss()
-    criterion = loss_function_start_point
 
+
+    #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    
+
+    #choose optimizer
+    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    #Choose loss
+    #criterion = nn.MSELoss()
+    #criterion = loss_function_start_point
+    criterion=nn.SmoothL1Loss()
+    
     # Train and validate
-    train_losses = train_model_diffusion(
+    train_losses, val_loss = train_model_diffusion(
         model,
         train_loader, 
+        val_loader,
         optimizer, 
         criterion, 
         device, 
@@ -96,31 +114,31 @@ def main():
         use_forces,
         noise_with_force, 
         max_grad_norm,
-        add_gaussian_noise)
-    
-    val_loss = validate_model_diffusion(
-        model, 
-        val_loader,
-        criterion, 
-        device, 
-        noiseadding_steps, 
-        beta_start, 
-        beta_end, 
-        use_forces, 
-        noise_with_force,
-        add_gaussian_noise)
-    
-    # Plot training and validation loss
+        add_gaussian_noise,
+        save_interval, 
+        save_path,
+        early_stop_patience)
+
+    #plot train losses
+    # Ensure x-axis matches the number of recorded epochs
+    epochs_trained = len(train_losses)
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
-    plt.axhline(val_loss, color='red', linestyle='--', label='Validation Loss')
+    plt.plot(range(1, epochs_trained + 1), train_losses, label='Training Loss')
+    plt.plot(range(1, epochs_trained + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.show()
     
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=5)
+    
+    # Testing
+    # Load best model
+    model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
+    model.to(device)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=True)
+
 
 
 if __name__ == "__main__":

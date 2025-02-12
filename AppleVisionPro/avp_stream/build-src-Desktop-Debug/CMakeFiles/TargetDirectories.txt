@@ -1,0 +1,7 @@
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/avp_stream.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/edit_cache.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/rebuild_cache.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/list_install_components.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/install.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/install/local.dir
+/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build-src-Desktop-Debug/CMakeFiles/install/strip.dir
