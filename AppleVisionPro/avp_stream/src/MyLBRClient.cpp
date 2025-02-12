@@ -145,7 +145,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     R_ini = Eigen::MatrixXd::Zero( 3, 3 );
     p_ini = Eigen::VectorXd::Zero( 3, 1 );
     p_0_ini = Eigen::VectorXd::Zero( 3, 1 );
-    p_vp_3d = Eigen::VectorXd::Zero( 3, 1 );
     p = Eigen::VectorXd::Zero( 3, 1 );
 
     J = Eigen::MatrixXd::Zero( 6, myLBR->nq );
@@ -177,11 +176,16 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     startPythonScript();
 
     // Transformation matrices of AVP
-    H_rw_ini = Eigen::MatrixXd::Identity( 4, 4 );
-    R_rw_ini = Eigen::MatrixXd::Identity( 3, 3 );
-    p_rw_ini = Eigen::VectorXd::Zero( 3 );
+    H_avp_11_ini = Eigen::MatrixXd::Identity( 4, 4 );
+    R_avp_11_ini = Eigen::MatrixXd::Identity( 3, 3 );
+    p_avp_11_ini = Eigen::VectorXd::Zero( 3 );
 
-    matrix_25 = new double[16];
+    matrix_25 = new double[16];                     // wrist
+    matrix_10 = new double[16];                     // finger metacarpal
+    matrix_11 = new double[16];                     // finger knuckle
+    matrix_12 = new double[16];                     // finger intermediate base
+    matrix_13 = new double[16];                     // finger intermediate tip
+    matrix_14 = new double[16];                     // finger tip
 
     // ************************************************************
     // Store data
@@ -364,18 +368,37 @@ void MyLBRClient::command()
     }
 
     // Lock mutex and update local variables from shared memory
-    double* trafo_vp;
+    double* h_25;
+    double* h_10;
+    double* h_11;
+    double* h_12;
+    double* h_13;
+    double* h_14;
 
     dataMutex.lock();
 
-    trafo_vp = matrix;
+    h_25 = matrix_25;
+    h_10 = matrix_10;
+    h_11 = matrix_11;
+    h_12 = matrix_12;
+    h_13 = matrix_13;
+    h_14 = matrix_14;
 
     dataMutex.unlock();
 
     // Convert APV transformation to Eigen
-    Eigen::MatrixXd H_rw = Eigen::Map<Eigen::MatrixXd>(trafo_vp, 4, 4);
-    Eigen::MatrixXd R_rw = H_rw.transpose().block< 3, 3 >( 0, 0 );
-    Eigen::VectorXd p_rw = H_rw.transpose().block< 3, 1 >( 0, 3 );
+    Eigen::MatrixXd H_avp_25 = Eigen::Map<Eigen::MatrixXd>(h_25, 4, 4);                     // wrist
+    Eigen::MatrixXd H_25_10 = Eigen::Map<Eigen::MatrixXd>(h_10, 4, 4);                     // finger metacarpal
+    Eigen::MatrixXd H_10_11 = Eigen::Map<Eigen::MatrixXd>(h_11, 4, 4);                     // finger knuckle
+    Eigen::MatrixXd H_11_12 = Eigen::Map<Eigen::MatrixXd>(h_12, 4, 4);                     // finger intermediate base
+    Eigen::MatrixXd H_12_13 = Eigen::Map<Eigen::MatrixXd>(h_13, 4, 4);                     // finger intermediate tip
+    Eigen::MatrixXd H_13_14 = Eigen::Map<Eigen::MatrixXd>(h_14, 4, 4);                     // finger tip
+
+    // Transformation of knuckle with respect to avp
+    Eigen::MatrixXd H_avp_11 = H_avp_25 * H_25_10 * H_10_11;
+
+    Eigen::MatrixXd R_avp_11 = H_avp_11.transpose().block< 3, 3 >( 0, 0 );
+    Eigen::VectorXd p_avp_11 = H_avp_11.transpose().block< 3, 1 >( 0, 3 );
 
 
     // ****************************************************matrix********
@@ -425,9 +448,9 @@ void MyLBRClient::command()
         p_ini = H_ini.block< 3, 1 >( 0, 3 );
 
         // Get initial AVP transformation
-        H_rw_ini = H_rw;
-        p_rw_ini = H_rw_ini.transpose().block< 3, 1 >( 0, 3 );
-        R_rw_ini = H_rw_ini.transpose().block< 3, 3 >( 0, 0 );
+        H_avp_11_ini = H_avp_11;
+        p_avp_11_ini = H_avp_11_ini.transpose().block< 3, 1 >( 0, 3 );
+        R_avp_11_ini = H_avp_11_ini.transpose().block< 3, 3 >( 0, 0 );
     }
 
     // ************************************************************
@@ -458,20 +481,20 @@ void MyLBRClient::command()
     // ****************** Convert AVP displacement to robot coordinates ******************
 
     // Displacement from initial position
-    Eigen::VectorXd p_vp_3d = p_rw - p_rw_ini;
+    Eigen::VectorXd del_p_avp_11 = p_avp_11 - p_avp_11_ini;
 
     // Transform to homogeneous coordinates
-    Eigen::VectorXd p_vp_4d = Eigen::VectorXd::Zero(4, 1);
-    p_vp_4d[3] = 1;
-    p_vp_4d.head<3>() = p_vp_3d;
+    Eigen::VectorXd del_p_avp_11_4d = Eigen::VectorXd::Zero(4, 1);
+    del_p_avp_11_4d[3] = 1;
+    del_p_avp_11_4d.head<3>() = del_p_avp_11;
 
     // Transformation to robot base coordinates
-    Eigen::MatrixXd H_rel = Eigen::MatrixXd::Zero( 4, 4 );
-    H_rel.block<3, 3>(0, 0) = R_z;
-    H_rel.block<3, 1>(0, 3) = p_ini;
+    Eigen::MatrixXd H_0_avp = Eigen::MatrixXd::Zero( 4, 4 );
+    H_0_avp.block<3, 3>(0, 0) = R_z;
+    H_0_avp.block<3, 1>(0, 3) = p_ini;
 
     // Extract 3x1 position
-    Eigen::VectorXd p_0_4d = H_rel * p_vp_4d;
+    Eigen::VectorXd p_0_4d = H_0_avp * del_p_avp_11_4d;
     Eigen::VectorXd p_0 = p_0_4d.block<3, 1>(0, 0);
 
 
@@ -481,7 +504,7 @@ void MyLBRClient::command()
     //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
 
     // Change rotation based on Apple Vision Pro
-    Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_rw_ini.transpose() * R_rw;
+    Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_avp_11_ini.transpose() * R_avp_11;
 
 
     // Transform rotations to quaternions
@@ -677,6 +700,11 @@ void MyLBRClient::runStreamerThread() {
                 dataMutex.lock();
 
                 matrix_25 = matrix_data_25;
+                matrix_10 = matrix_data_10;
+                matrix_11 = matrix_data_11;
+                matrix_12 = matrix_data_12;
+                matrix_13 = matrix_data_13;
+                matrix_14 = matrix_data_14;
 
                 dataMutex.unlock();
 

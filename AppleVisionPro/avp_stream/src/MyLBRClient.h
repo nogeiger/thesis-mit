@@ -117,6 +117,15 @@ private:
     void startPythonScript();
 
     double* matrix_25;
+    double* matrix_10;
+    double* matrix_11;
+    double* matrix_12;
+    double* matrix_13;
+    double* matrix_14;
+
+    Eigen::MatrixXd H_avp_11_ini;
+    Eigen::MatrixXd R_avp_11_ini;
+    Eigen::VectorXd p_avp_11_ini;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
@@ -158,15 +167,11 @@ private:
     Eigen::Matrix3d R_z;
     Eigen::MatrixXd J;
     
-    Eigen::MatrixXd H_rw_ini;
-    Eigen::MatrixXd R_rw_ini;
-    Eigen::MatrixXd p_rw_ini;
     Eigen::MatrixXd H_ini;
     Eigen::MatrixXd R_ini;
     Eigen::VectorXd p_ini;
     Eigen::VectorXd p;
     Eigen::VectorXd p_0_ini;
-    Eigen::VectorXd p_vp_3d;
     
     Eigen::MatrixXd Kp;
     Eigen::MatrixXd Kr;
