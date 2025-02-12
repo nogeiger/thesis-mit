@@ -3,7 +3,7 @@ import numpy as np
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.31.169.133"  # Replace with your actual IP
+avp_ip = "10.29.171.74"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 

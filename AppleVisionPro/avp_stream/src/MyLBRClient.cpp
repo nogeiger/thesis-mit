@@ -181,7 +181,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     R_rw_ini = Eigen::MatrixXd::Identity( 3, 3 );
     p_rw_ini = Eigen::VectorXd::Zero( 3 );
 
-    matrix = new double[16];
+    matrix_25 = new double[16];
 
     // ************************************************************
     // Store data
@@ -481,12 +481,8 @@ void MyLBRClient::command()
     //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
 
     // Change rotation based on Apple Vision Pro
-    
-    // TODO: CHECK THIS!!!
-    // R_rw_ini = R_z * R_rw_ini;
-    // R_rw = R_z * R_rw;
-    
     Eigen::Matrix3d R_ee_des = R.transpose() * R_ini * R_rw_ini.transpose() * R_rw;
+
 
     // Transform rotations to quaternions
     Eigen::Quaterniond Q(R_ee_des);         
@@ -500,7 +496,7 @@ void MyLBRClient::command()
     }
 
     // Scale desired angle
-    int scaleFact = 5.0;
+    int scaleFact = 1.0;
     theta = theta / scaleFact;
 
     // Extract unit rotation axis 
@@ -527,6 +523,9 @@ void MyLBRClient::command()
     double alpha_v = compute_alpha(Lambda_v, Kp_diag, damping_factor_v);
     Eigen::MatrixXd Bp = alpha_v * Kp;
 
+    //    cout << "Bp: " << endl;
+    //    cout << Bp << endl;
+
     // Calculate force
     Eigen::VectorXd f = Kp * del_p - Bp * dx;
 
@@ -549,6 +548,9 @@ void MyLBRClient::command()
     Eigen::Vector3d Kr_diag = Kr.diagonal();
     double alpha_w = compute_alpha(Lambda_w, Kr_diag, damping_factor_r);
     Eigen::MatrixXd Br = alpha_w * Kr;
+
+    //    cout << "Br: " << endl;
+    //    cout << Br << endl;
 
     // *********************************************************************
     // ********************         TO CHECK        ************************
@@ -644,14 +646,20 @@ void MyLBRClient::runStreamerThread() {
             boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
 
         // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
-        shm.truncate(16 * sizeof(double) + sizeof(int64_t));
+        // New: 6 * 16 doubles + ready flag 8 bytes = 6 * 16 * sizeof(double) + sizeof(int64_t)
+        shm.truncate(6 * 16 * sizeof(double) + sizeof(int64_t));
 
         // Map the shared memory
         boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
 
         // Define pointers based on shared memory layout
         int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
-        double* matrix_data = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_25 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_10 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_11 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_12 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_13 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_14 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
@@ -668,7 +676,7 @@ void MyLBRClient::runStreamerThread() {
                 // Be carful, Johannes was there
                 dataMutex.lock();
 
-                matrix = matrix_data;
+                matrix_25 = matrix_data_25;
 
                 dataMutex.unlock();
 

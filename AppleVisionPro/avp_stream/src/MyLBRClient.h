@@ -116,7 +116,7 @@ private:
     void runStreamerThread();
     void startPythonScript();
 
-    double* matrix;
+    double* matrix_25;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
