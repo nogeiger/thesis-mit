@@ -7,12 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
-from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorLSTMWithAttention, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConvLSTM, NoisePredictorConv1D, NoisePredictorHybrid, NoisePredictorTCN
+from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
-
-
 
 
 def main():
@@ -21,12 +19,12 @@ def main():
     """ 
     
     # Definition of parameters
-    seq_length = 128 #seq len of data
+    seq_length = 32 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 512 #hidden dim of the model
+    hidden_dim = 512#512(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size = 64 #batch size
     num_epochs = 500 #number of epochs
-    learning_rate = 3e-4 #learning rate
+    learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
@@ -37,12 +35,12 @@ def main():
     beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    early_stop_patience = 30 #for early stopping
+    early_stop_patience = 50 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
 
     # File path to the real data
-    file_path = "Data/1D_diffusion_large_data"
+    file_path = "Data/1D_diffusion_large_multiple"
 
     # Load real data
     data = load_robot_data(file_path, seq_length, use_overlap=False)
@@ -82,15 +80,16 @@ def main():
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorLSTMWithAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
+
+
+
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorConvLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorHybrid(seq_length, hidden_dim, use_forces=use_forces).to(device)
-    #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    
 
     #choose optimizer
     #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -135,9 +134,10 @@ def main():
     
     # Testing
     # Load best model
-    model.load_state_dict(torch.load("save_checkpoints/model_epoch_500.pth", weights_only=True))
+    model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=True)
 
 
 

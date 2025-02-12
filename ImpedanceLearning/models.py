@@ -30,6 +30,8 @@ class NoisePredictorInitial(nn.Module):
         self.hidden_layer_3 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_4 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_5 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_6 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_7 = nn.Linear(hidden_dim, hidden_dim)
         self.output_layer = nn.Linear(hidden_dim, seq_length * 3)  # Output clean trajectory (pos_0)
         self.relu = nn.ReLU()
 
@@ -63,10 +65,65 @@ class NoisePredictorInitial(nn.Module):
         x = self.relu(x)
         x = self.hidden_layer_4(x)
         x = self.relu(x)
-        x = self.hidden_layer_5(x)
-        x = self.relu(x)
         predicted_noise = self.output_layer(x)
         return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
+
+
+#Transformer
+class NoisePredictorTransformer(nn.Module):
+    def __init__(self, seq_length, hidden_dim, num_heads=4, num_layers=2, use_forces=False):
+        super(NoisePredictorTransformer, self).__init__()
+        self.use_forces = use_forces
+        input_dim = 3  # (x, y, z)
+
+        if self.use_forces:
+            input_dim += 3  # Include force dimensions (fx, fy, fz)
+
+        self.embedding = nn.Linear(input_dim, hidden_dim)  # Embed trajectory + forces into hidden_dim
+        self.positional_encoding = nn.Parameter(torch.zeros(1, seq_length, hidden_dim))  # Learnable positional encodings
+
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, batch_first=True)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Fully connected output layers
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_dim // 2, 3)  # Output clean trajectory (x, y, z)
+
+    def forward(self, noisy_trajectory, forces=None):
+        """
+        Forward pass to predict clean 3D trajectory.
+
+        Args:
+            noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
+            forces (torch.Tensor, optional): Input forces of shape [batch_size, seq_length, 3].
+
+        Returns:
+            torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
+        """
+        batch_size, seq_length, _ = noisy_trajectory.shape
+
+        # Concatenate forces with trajectory if used
+        if self.use_forces:
+            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Shape: [batch_size, seq_length, 6]
+        else:
+            x = noisy_trajectory  # Shape: [batch_size, seq_length, 3]
+
+        # Embed input and add positional encoding
+        x = self.embedding(x) + self.positional_encoding  # Shape: [batch_size, seq_length, hidden_dim]
+
+        # Pass through Transformer Encoder
+        x = self.transformer(x)  # Shape: [batch_size, seq_length, hidden_dim]
+
+        # Decode to output clean trajectory
+        x = self.fc1(x)
+        x = self.relu(x)
+        predicted_trajectory = self.fc2(x)  # Shape: [batch_size, seq_length, 3]
+
+        return predicted_trajectory
+
+
 
 #LSTM
 class NoisePredictorLSTM(nn.Module):
@@ -76,203 +133,57 @@ class NoisePredictorLSTM(nn.Module):
         input_dim = 3  # (x, y, z)
 
         if self.use_forces:
-            # Instead of just concatenating, learn a relationship between forces & trajectory
             self.fusion_fc = nn.Sequential(
-                nn.Linear(6, hidden_dim // 2),  # Combine (x, y, z, fx, fy, fz)
+                nn.Linear(6, hidden_dim // 2),
                 nn.ReLU(),
-                nn.Linear(hidden_dim // 2, hidden_dim),  # Learn interaction features
+                nn.BatchNorm1d(seq_length),
+                nn.Linear(hidden_dim // 2, hidden_dim),
                 nn.ReLU()
             )
-            input_dim = hidden_dim  # The processed feature size replaces direct input
+            input_dim = hidden_dim
 
-        # LSTM layers
-        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True, num_layers=3)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True, num_layers=1, dropout=0.)
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(0.3)
 
-        # Fully Connected layers for refining the LSTM output
         self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2)
         self.activation1 = nn.ReLU()
 
         self.fc2 = nn.Linear(hidden_dim // 2, hidden_dim // 4)
         self.activation2 = nn.ReLU()
 
-        self.fc3 = nn.Linear(hidden_dim // 4, 3)  # Final output (x, y, z)
+        self.fc3 = nn.Linear(hidden_dim // 4, 3)
 
     def forward(self, noisy_trajectory, forces=None):
-        batch_size, seq_length, _ = noisy_trajectory.shape
-
         if self.use_forces:
-            # Learn the relationship between force & trajectory using fusion layer
-            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Shape: [batch_size, seq_length, 6]
-            x = self.fusion_fc(x)  # Now transformed into learned interaction features
+            # Concatenate forces and trajectory
+            x = torch.cat((noisy_trajectory, forces), dim=-1)
+            x = self.fusion_fc(x)  # Learn features from forces + trajectory
         else:
-            x = noisy_trajectory
+            x = noisy_trajectory  # Shape: [batch_size, seq_length, input_dim]
 
-        # Pass through LSTM
         lstm_out, _ = self.lstm(x)  # Shape: [batch_size, seq_length, hidden_dim]
+        lstm_out = self.layer_norm(lstm_out)  # Normalize LSTM output
 
-        # Pass through additional FF layers for refinement
-        x_refined = self.fc1(lstm_out)  # [batch_size, seq_length, hidden_dim//2]
+        # Add skip connection at this stage, after the LSTM
+        residual = lstm_out
+
+        x_refined = self.fc1(lstm_out)  # [batch_size, seq_length, hidden_dim // 2]
         x_refined = self.activation1(x_refined)
 
-        x_refined = self.fc2(x_refined)  # [batch_size, seq_length, hidden_dim//4]
+        x_refined = self.fc2(x_refined)  # [batch_size, seq_length, hidden_dim // 4]
         x_refined = self.activation2(x_refined)
 
-        predicted_noise = self.fc3(x_refined)  # [batch_size, seq_length, 3]
+        # Add skip connection to the last intermediate layer
+        x_refined += residual  # Ensure the dimensions match for addition
+
+        predicted_noise = self.fc3(x_refined)  # Final output: [batch_size, seq_length, 3]
+
+        # Optional: If the original input has the same shape, add a final residual
+        predicted_noise += noisy_trajectory
 
         return predicted_noise
     
-class NoisePredictorTransformer(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=2, nhead=2, dropout=0):
-        super(NoisePredictorTransformer, self).__init__()
-        self.use_forces = use_forces
-        self.hidden_dim = hidden_dim
-
-        # Define input dimensions
-        input_dim = 3  # (x, y, z)
-        force_dim = 3  # (force_x, force_y, force_z)
-
-        # Embedding layers for trajectory & forces
-        self.trajectory_embedding = nn.Linear(input_dim, hidden_dim)
-        self.force_embedding = nn.Linear(force_dim, hidden_dim) if use_forces else None
-
-        # Positional Encoding for Time Awareness
-        self.positional_encoding = PositionalEncoding(hidden_dim, dropout)
-
-        # Multi-Head Attention for Force-Trajectory Fusion
-        if self.use_forces:
-            self.attention = MultiheadAttention(embed_dim=hidden_dim, num_heads=nhead, dropout=dropout, batch_first=True)
-
-        # Transformer Encoder with Normalization
-        encoder_layer = TransformerEncoderLayer(d_model=hidden_dim, nhead=nhead, dim_feedforward=hidden_dim * 2, dropout=dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, num_layers)
-
-        # Layer Normalization for stability
-        self.layer_norm = nn.LayerNorm(hidden_dim)
-
-        # Output Layer
-        self.fc_out = nn.Linear(hidden_dim, 3)  # Predict (x, y, z)
-
-    def forward(self, noisy_trajectory, forces=None):
-        """
-        Args:
-            noisy_trajectory: [batch_size, seq_length, 3]
-            forces: [batch_size, seq_length, 3] (optional)
-
-        Returns:
-            predicted_noise: [batch_size, seq_length, 3]
-        """
-        # Embed trajectory
-        x = self.trajectory_embedding(noisy_trajectory)  # [batch_size, seq_length, hidden_dim]
-
-        # Add positional encoding before any attention
-        #x = self.positional_encoding(x)
-
-        #if self.use_forces:
-        #    # Embed forces and apply attention fusion
-        #    force_embedded = self.force_embedding(forces)  # [batch_size, seq_length, hidden_dim]
-        #    x, _ = self.attention(query=x, key=force_embedded, value=force_embedded)
-
-        # Pass through Transformer Encoder (which also has attention)
-        x = self.transformer_encoder(x)
-
-        # Apply Layer Norm for stability before final output
-        x = self.layer_norm(x)
-
-        # Final prediction
-        predicted_noise = self.fc_out(x)  # [batch_size, seq_length, 3]
-
-        return predicted_noise
-
-
-class PositionalEncoding(nn.Module):
-    """Injects positional information to help Transformer recognize sequence order"""
-    def __init__(self, hidden_dim, dropout=0.1, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        # Compute positional encodings
-        pe = torch.zeros(max_len, hidden_dim)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # Shape: [1, max_len, hidden_dim]
-
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        """
-        Args:
-            x: [batch_size, seq_length, hidden_dim]
-        Returns:
-            x: [batch_size, seq_length, hidden_dim] (with added positional encoding)
-        """
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
-    
-#Attention class for other models
-class AttentionLayer(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
-        super(AttentionLayer, self).__init__()
-        self.query = nn.Linear(input_dim, hidden_dim)
-        self.key = nn.Linear(input_dim, hidden_dim)
-        self.value = nn.Linear(input_dim, hidden_dim)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, forces, noisy_trajectory):
-        """
-        Args:
-            forces: [batch_size, seq_length, 3]
-            noisy_trajectory: [batch_size, seq_length, 3]
-        
-        Returns:
-            context_vector: [batch_size, seq_length, hidden_dim]
-        """
-        Q = self.query(forces)  # Query from force input
-        K = self.key(noisy_trajectory)  # Key from noisy trajectory
-        V = self.value(noisy_trajectory)  # Value from noisy trajectory
-
-        attention_weights = self.softmax(torch.bmm(Q, K.transpose(1, 2)))  # Compute attention scores
-        context_vector = torch.bmm(attention_weights, V)  # Apply attention
-        
-        return context_vector
-
-#LSTM with attention
-class NoisePredictorLSTMWithAttention(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=True, num_layers=2, dropout=0.3):
-        super(NoisePredictorLSTMWithAttention, self).__init__()
-        self.use_forces = use_forces
-        input_dim = 3  # (x, y, z)
-
-        if self.use_forces:
-            input_dim += 3  # Include forces (force_x, force_y, force_z)
-
-        self.attention = AttentionLayer(input_dim=3, hidden_dim=hidden_dim)
-
-        self.lstm = nn.LSTM(
-            input_dim + hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout
-        )
-        self.fc = nn.Linear(hidden_dim, 3)
-
-    def forward(self, noisy_trajectory, forces=None):
-        """
-        Args:
-            noisy_trajectory: [batch_size, seq_length, 3]
-            forces: [batch_size, seq_length, 3] (optional)
-
-        Returns:
-            predicted_noise: [batch_size, seq_length, 3]
-        """
-        if self.use_forces:
-            context_vector = self.attention(forces, noisy_trajectory)
-            x = torch.cat((noisy_trajectory, forces, context_vector), dim=-1)  # Concatenate attention output
-        else:
-            x = noisy_trajectory
-
-        lstm_out, _ = self.lstm(x)  
-        predicted_noise = self.fc(lstm_out)
-
-        return predicted_noise
     
 class NoisePredictorGRU(nn.Module):
     def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=2, dropout=0.3):
@@ -294,124 +205,101 @@ class NoisePredictorGRU(nn.Module):
 
         return predicted_noise
 
+
+
 class NoisePredictorConv1D(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False):
+    def __init__(self, seq_length, hidden_dim, num_layers=5, use_forces=False, kernel_size=3, dropout=0.2):
         super(NoisePredictorConv1D, self).__init__()
         self.use_forces = use_forces
-        input_dim = 3 if not use_forces else 6  
+        input_dim = 3 if not use_forces else 6  # Input: (x, y, z) or (x, y, z, fx, fy, fz)
 
-        self.conv1 = nn.Conv1d(in_channels=input_dim, out_channels=hidden_dim, kernel_size=5, padding=2)
-        self.conv2 = nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv1d(in_channels=hidden_dim, out_channels=3, kernel_size=1)  # Output layer
-
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            in_channels = input_dim if i == 0 else hidden_dim
+            out_channels = hidden_dim if i < num_layers - 1 else 3  # Final layer outputs 3 channels (x, y, z)
+            self.layers.append(
+                nn.Conv1d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    padding=(kernel_size - 1) // 2  # Maintain same sequence length
+                )
+            )
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, noisy_trajectory, forces=None):
+        """
+        Forward pass for the Conv1D model.
+
+        Args:
+            noisy_trajectory (torch.Tensor): Shape [batch_size, seq_length, 3].
+            forces (torch.Tensor, optional): Shape [batch_size, seq_length, 3].
+
+        Returns:
+            torch.Tensor: Predicted clean trajectory, shape [batch_size, seq_length, 3].
+        """
         if self.use_forces:
-            x = torch.cat((noisy_trajectory, forces), dim=-1)
+            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Concatenate trajectory and forces
         else:
-            x = noisy_trajectory
+            x = noisy_trajectory  # Shape: [batch_size, seq_length, 3]
 
         x = x.permute(0, 2, 1)  # Change shape for Conv1D: (batch, channels, seq_length)
 
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.conv3(x)
+        # Pass through Conv1D layers
+        for i, layer in enumerate(self.layers[:-1]):  # All layers except the last
+            x = self.relu(layer(x))
+            x = self.dropout(x)
 
-        x = x.permute(0, 2, 1)  # Convert back: (batch, seq_length, channels)
-        return x
+        # Final layer (no activation, no dropout)
+        x = self.layers[-1](x)
 
-class NoisePredictorConvLSTM(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=2, dropout=0.3):
-        super(NoisePredictorConvLSTM, self).__init__()
-        self.use_forces = use_forces
-        input_dim = 3 if not use_forces else 6  
-
-        self.conv = nn.Conv1d(in_channels=input_dim, out_channels=hidden_dim, kernel_size=5, padding=2)
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_dim, 3)
-
-    def forward(self, noisy_trajectory, forces=None):
-        if self.use_forces:
-            x = torch.cat((noisy_trajectory, forces), dim=-1)
-        else:
-            x = noisy_trajectory
-
-        x = x.permute(0, 2, 1)  # Conv1D expects (batch, channels, seq_length)
-        x = torch.relu(self.conv(x))
         x = x.permute(0, 2, 1)  # Convert back to (batch, seq_length, channels)
-
-        lstm_out, _ = self.lstm(x)
-        predicted_noise = self.fc(lstm_out)
-
-        return predicted_noise
-
+        return x
 
 class NoisePredictorTCN(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False):
+    def __init__(self, seq_length, hidden_dim, use_forces=False, num_layers=5, kernel_size=3, dropout=0.15):
         super(NoisePredictorTCN, self).__init__()
         self.use_forces = use_forces
-        input_dim = 3 if not use_forces else 6  
+        input_dim = 3 if not use_forces else 6  # Input dimensions: (x, y, z) or (x, y, z, fx, fy, fz)
 
-        self.conv1 = nn.Conv1d(input_dim, hidden_dim, kernel_size=3, dilation=1, padding=1)
-        self.conv2 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, dilation=2, padding=2)
-        self.conv3 = nn.Conv1d(hidden_dim, 3, kernel_size=1)  # Output layer
+        # Define TCN layers
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            dilation = 2 ** i
+            in_channels = input_dim if i == 0 else hidden_dim
+            out_channels = hidden_dim if i < num_layers - 1 else 3  # Output layer reduces to 3 channels (x, y, z)
+            self.layers.append(
+                nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, padding=(kernel_size - 1) * dilation // 2, dilation=dilation)
+            )
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, noisy_trajectory, forces=None):
+        """
+        Forward pass for TCN.
+        
+        Args:
+            noisy_trajectory (torch.Tensor): Shape [batch_size, seq_length, 3].
+            forces (torch.Tensor, optional): Shape [batch_size, seq_length, 3].
+        
+        Returns:
+            torch.Tensor: Predicted clean trajectory, shape [batch_size, seq_length, 3].
+        """
         if self.use_forces:
-            x = torch.cat((noisy_trajectory, forces), dim=-1)
+            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Concatenate trajectory and forces
         else:
-            x = noisy_trajectory
+            x = noisy_trajectory  # Shape: [batch_size, seq_length, 3]
 
-        x = x.permute(0, 2, 1)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = self.conv3(x)
-        x = x.permute(0, 2, 1)
+        x = x.permute(0, 2, 1)  # Change to [batch_size, features, seq_length] for Conv1d
 
+        # Pass through TCN layers
+        for layer in self.layers[:-1]:  # Exclude the final layer
+            x = F.relu(layer(x))
+            x = self.dropout(x)
+
+        # Final layer (no activation or dropout)
+        x = self.layers[-1](x)
+
+        x = x.permute(0, 2, 1)  # Back to [batch_size, seq_length, features]
         return x
 
-#attention,cnn,lstm
-class NoisePredictorHybrid(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=True, num_layers=2, dropout=0.3):
-        super(NoisePredictorHybrid, self).__init__()
-        self.use_forces = use_forces
-        input_dim = 3 if not use_forces else 6  
-
-        # Attention Layer
-        self.attention = AttentionLayer(input_dim=3, hidden_dim=hidden_dim)
-
-        # 1D CNN for Local Feature Extraction
-        self.conv1 = nn.Conv1d(in_channels=input_dim + hidden_dim, out_channels=hidden_dim, kernel_size=5, padding=2)
-        self.conv2 = nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=3, padding=1)
-
-        # LSTM for Temporal Dependencies
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout)
-
-        # Fully Connected Output Layer
-        self.fc = nn.Linear(hidden_dim, 3)
-
-    def forward(self, noisy_trajectory, forces=None):
-        """
-        Args:
-            noisy_trajectory: [batch_size, seq_length, 3]
-            forces: [batch_size, seq_length, 3] (optional)
-
-        Returns:
-            predicted_noise: [batch_size, seq_length, 3]
-        """
-        if self.use_forces:
-            context_vector = self.attention(forces, noisy_trajectory)  
-            x = torch.cat((noisy_trajectory, forces, context_vector), dim=-1)  
-        else:
-            x = noisy_trajectory
-
-        x = x.permute(0, 2, 1)  # Change shape for CNN (batch, channels, seq_length)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = x.permute(0, 2, 1)  # Convert back for LSTM (batch, seq_length, channels)
-
-        lstm_out, _ = self.lstm(x)  
-        predicted_noise = self.fc(lstm_out)  
-
-        return predicted_noise

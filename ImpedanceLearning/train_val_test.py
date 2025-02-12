@@ -45,7 +45,8 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
     # Initialize ReduceLROnPlateau
     lr_scheduler_patience = max(5, int(early_stop_patience * 0.32))  # Reduce LR after 1/3 of early stopping patience
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=lr_scheduler_patience, verbose=True)
+    #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=lr_scheduler_patience, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=True)
 
 
 
