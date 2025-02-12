@@ -1,0 +1,8 @@
+ImpedanceLearning/Data/
+ImpedanceLearning/Results/
+AppleVisionPro/streamed_data.txt
+ImpedanceLearning/__pycache__/
+ImpedanceLearning/save_checkpoints/
+ImpedanceLearning/syntheticCSV.py
+ImpedanceLearning/synthetic_trajectory_data.csv
+__pycache__/
