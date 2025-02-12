@@ -77,6 +77,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
             # Convert t to a PyTorch tensor
             t = torch.tensor([t], device=device).float()
+
             # Predict the noise from the noisy trajectory
             if use_forces:
                 predicted_noise = model(noisy_trajectory, t, force)
@@ -245,7 +246,8 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
 
         for step in range(num_denoising_steps):
             # Compute the timestep t for the current denoising step
-            t = torch.tensor([num_denoising_steps - step - 1], device=device)  # Generate time step t
+            t = torch.tensor([num_denoising_steps - step - 1], device=device).float()  # Convert t to float
+            t = t / num_denoising_steps  # Scale t to the range [0, 1]
 
             # Predict noise and perform denoising
             if use_forces:

@@ -86,7 +86,7 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     #print(torch.sqrt(1 - alpha_bar[t]))
     noise_scale = 1 / torch.sqrt(alpha_bar[t])
     
-    return noisy_trajectory_output, noise_scale, t
+    return noisy_trajectory_output, noise_scale, t/noiseadding_steps
 
 
 def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):
