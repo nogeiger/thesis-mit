@@ -23,11 +23,12 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 256#512(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 500 #number of epochs
+    num_epochs = 5#500 #number of epochs
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
+    use_time=False #use time stamp of noise as input
     #if force is used as noise, then force should not be used as input
     if noise_with_force:
             use_forces = False
@@ -81,7 +82,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
-    model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorTransformer(seq_length, hidden_dim, use_time=use_time,use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
 
@@ -111,6 +112,7 @@ def main():
         noiseadding_steps, 
         beta_start, 
         beta_end, 
+        use_time,
         use_forces,
         noise_with_force, 
         max_grad_norm,
@@ -136,8 +138,8 @@ def main():
     # Load best model
     model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=False)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_time, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_time, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=True)
 
 
 

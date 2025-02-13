@@ -17,7 +17,7 @@ import logging
 
 
 def train_model_diffusion(model, traindataloader, valdataloader,optimizer, criterion, device, num_epochs, noiseadding_steps, beta_start, 
-                          beta_end, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, 
+                          beta_end, use_time=False, use_forces=False, noise_with_force=False, max_grad_norm=7.0, add_gaussian_noise=False, save_interval = 20, 
                           save_path = "save_checkpoints",early_stop_patience = 25):
     """
     Trains the NoisePredictor model using diffusion-based noisy trajectories.
@@ -78,11 +78,16 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             # Convert t to a PyTorch tensor
             t = torch.tensor([t], device=device).float()
 
-            # Predict the noise from the noisy trajectory
             if use_forces:
-                predicted_noise = model(noisy_trajectory, t, force)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t, force)
+                else:
+                    predicted_noise = model(noisy_trajectory, None, force)
             else:
-                predicted_noise = model(noisy_trajectory, t)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t)
+                else:
+                    predicted_noise = model(noisy_trajectory)
 
             # Calculate loss and perform backward pass
             loss = criterion(predicted_noise, actual_noise)
@@ -104,7 +109,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         model.eval()  # Switch to evaluation mode
         with torch.no_grad():
             val_loss = validate_model_diffusion(
-                model, valdataloader, criterion, device, noiseadding_steps, beta_start, beta_end, 
+                model, valdataloader, criterion, device, noiseadding_steps, beta_start, beta_end, use_time,
                 use_forces, noise_with_force, add_gaussian_noise
             )
         val_epoch_losses.append(val_loss)
@@ -149,7 +154,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
 
 def validate_model_diffusion(model, dataloader, criterion, device, max_noiseadding_steps, 
-                             beta_start, beta_end, use_forces=False, noise_with_force=False, add_gaussian_noise=False):
+                             beta_start, beta_end, use_time=False , use_forces=False, noise_with_force=False, add_gaussian_noise=False):
     """
     Validates the NoisePredictor model on unseen data using diffusion-based noisy trajectories.
 
@@ -190,10 +195,18 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             # Convert t to a PyTorch tensor
             t = torch.tensor([t], device=device).float()
             # Predict the noise from the noisy trajectory
+
+
             if use_forces:
-                predicted_noise = model(noisy_trajectory, t, force)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t, force)
+                else:
+                    predicted_noise = model(noisy_trajectory, None, force)
             else:
-                predicted_noise = model(noisy_trajectory, t)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t)
+                else:
+                    predicted_noise = model(noisy_trajectory)
 
             # Calculate loss
             loss = criterion(predicted_noise, actual_noise)
@@ -205,7 +218,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
     return avg_loss
 
 
-def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=1, num_samples=5, postprocessing = False):
+def test_model(model, val_loader, val_dataset, device, use_time, use_forces, num_denoising_steps=1, num_samples=5, postprocessing = False):
     """
     Function to evaluate the model by predicting noise, performing iterative denoising,
     and visualizing the results.
@@ -248,12 +261,19 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
             # Compute the timestep t for the current denoising step
             t = torch.tensor([num_denoising_steps - step - 1], device=device).float()  # Convert t to float
             t = t / num_denoising_steps  # Scale t to the range [0, 1]
-
-            # Predict noise and perform denoising
+            #print("HI")
             if use_forces:
-                predicted_noise = model(denoised_trajectory, t, force)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t, force)
+                else:
+                    predicted_noise = model(noisy_trajectory, None, force)
             else:
-                predicted_noise = model(denoised_trajectory, t)
+                if use_time:
+                    predicted_noise = model(noisy_trajectory, t)
+                else:
+                    predicted_noise = model(noisy_trajectory)
+
+
             denoised_trajectory = denoised_trajectory - predicted_noise  # Remove noise iteratively
 
         # Denormalize trajectories

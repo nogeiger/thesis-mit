@@ -86,11 +86,14 @@ class NoisePredictorInitial(nn.Module):
 
 #Transformer
 class NoisePredictorTransformer(nn.Module):
-    def __init__(self, seq_length, hidden_dim, num_heads=4, num_layers=2, use_forces=False):
+    def __init__(self, seq_length, hidden_dim, num_heads=4, num_layers=2, use_time=False, use_forces=False):
         super(NoisePredictorTransformer, self).__init__()
         self.use_forces = use_forces
+        self.use_time = use_time
         input_dim = 3  # (x, y, z)
-        self.timestep_embedding = nn.Linear(1, hidden_dim)
+        
+        if self.use_time:
+            self.timestep_embedding = nn.Linear(1, hidden_dim)
 
         if self.use_forces:
             input_dim += 3  # Include force dimensions (fx, fy, fz)
@@ -107,7 +110,7 @@ class NoisePredictorTransformer(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_dim // 2, 3)  # Output clean trajectory (x, y, z)
 
-    def forward(self, noisy_trajectory,t, forces=None):
+    def forward(self, noisy_trajectory,t=None, forces=None):
         """
         Forward pass to predict clean 3D trajectory.
 
@@ -119,15 +122,20 @@ class NoisePredictorTransformer(nn.Module):
             torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
         """
         batch_size, seq_length, _ = noisy_trajectory.shape
-        t_embedded = self.timestep_embedding(t)
+        if self.use_time:
+            t_embedded = self.timestep_embedding(t)
         # Concatenate forces with trajectory if used
         if self.use_forces:
+
             x = torch.cat((noisy_trajectory, forces), dim=-1)  # Shape: [batch_size, seq_length, 6]
         else:
             x = noisy_trajectory  # Shape: [batch_size, seq_length, 3]
 
         # Embed input and add positional encoding
-        x = self.embedding(x) + self.positional_encoding +t_embedded  # Shape: [batch_size, seq_length, hidden_dim]
+        x = self.embedding(x) + self.positional_encoding  # Shape: [batch_size, seq_length, hidden_dim]
+
+        if self.use_time:
+            x+=t_embedded
 
         # Pass through Transformer Encoder
         x = self.transformer(x)  # Shape: [batch_size, seq_length, hidden_dim]
