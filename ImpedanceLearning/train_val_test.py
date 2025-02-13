@@ -261,7 +261,7 @@ def test_model(model, val_loader, val_dataset, device, use_time, use_forces, num
             # Compute the timestep t for the current denoising step
             t = torch.tensor([num_denoising_steps - step - 1], device=device).float()  # Convert t to float
             t = t / num_denoising_steps  # Scale t to the range [0, 1]
-            #print("HI")
+
             if use_forces:
                 if use_time:
                     predicted_noise = model(noisy_trajectory, t, force)
