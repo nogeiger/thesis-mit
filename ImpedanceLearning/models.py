@@ -157,7 +157,7 @@ class NoisePredictorTransformer(nn.Module):
 
 #LSTM
 class NoisePredictorLSTM(nn.Module):
-    def __init__(self, seq_length, hidden_dim, use_forces=False):
+    def __init__(self, seq_length, hidden_dim, use_time=False, use_forces=False):
         super(NoisePredictorLSTM, self).__init__()
         self.use_forces = use_forces
         input_dim = 3  # (x, y, z)
@@ -184,7 +184,7 @@ class NoisePredictorLSTM(nn.Module):
 
         self.fc3 = nn.Linear(hidden_dim // 4, 3)
 
-    def forward(self, noisy_trajectory, forces=None):
+    def forward(self, noisy_trajectory, t=None, forces=None):
         if self.use_forces:
             # Concatenate forces and trajectory
             x = torch.cat((noisy_trajectory, forces), dim=-1)
