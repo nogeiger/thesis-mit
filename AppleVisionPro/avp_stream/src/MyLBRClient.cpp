@@ -144,10 +144,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
         1.0, 0.0,  0.0,
         0.0, 0.0, 1.0;
 
-    R_avp_0 <<  1.0, 0.0,  0.0,
-        0.0, 0.0,  1.0,
-        0.0, 1.0, 0.0;
-
     H_ini = Eigen::MatrixXd::Zero( 4, 4 );
     R_ini = Eigen::MatrixXd::Zero( 3, 3 );
     p_ini = Eigen::VectorXd::Zero( 3, 1 );
@@ -250,9 +246,9 @@ MyLBRClient::~MyLBRClient()
     delete myLBR;
     delete this->ftSensor;
 
-    if (File_data.is_open()) {
-        File_data.close();
-    }
+    //    if (File_data.is_open()) {
+    //        File_data.close();
+    //    }
 
 }
 
@@ -391,39 +387,33 @@ void MyLBRClient::command()
     Eigen::MatrixXd H_avp_rw = Eigen::Map<Eigen::MatrixXd>(h_rw, 4, 4);         
 
     // Rotation of knuckle with respect to avp
-    //R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
+    R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
-    // ******************** NEW ********************  
-    R_avp_rw = H_avp_rw.block< 3, 3 >( 0, 0 );
-
-     
     Eigen::MatrixXd R_corrected = R_avp_rw;
     R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
     R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
     R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
 
     R_avp_rw = R_corrected;
+
     // A simple filter for the rotation
-    //if( currentTime < sampleTime )
-    //{
-    //    R_avp_rw_prev = R_avp_rw;
-    //    R_avp_rw_prev_prev = R_avp_rw;
-    //}
-    //    R_avp_rw = ( R_avp_rw + R_avp_rw_prev + R_avp_rw_prev_prev )R / 3;
+    if( currentTime < sampleTime )
+    {
+        R_avp_rw_prev = R_avp_rw;
+        R_avp_rw_prev_prev = R_avp_rw;
+    }
+    R_avp_rw = ( R_avp_rw + R_avp_rw_prev + R_avp_rw_prev_prev ) / 3;
 
     // Positon of knuckle with respect to avp
-    // p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
-
-    // ******************** NEW ********************  
-    p_avp_rw = H_avp_rw.block< 3, 1 >( 0, 3 );
+    p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
 
     // A simple filter for the translation
-    //if( currentTime < sampleTime )
-    //{
-    //    p_avp_rw_prev = p_avp_rw;
-    //    p_avp_rw_prev_prev = p_avp_rw;
-    //}
-    //    p_avp_rw = ( p_avp_rw + p_avp_rw_prev + p_avp_rw_prev_prev ) / 3;
+    if( currentTime < sampleTime )
+    {
+        p_avp_rw_prev = p_avp_rw;
+        p_avp_rw_prev_prev = p_avp_rw;
+    }
+    p_avp_rw = ( p_avp_rw + p_avp_rw_prev + p_avp_rw_prev_prev ) / 3;
 
 
     // ****************************************************matrix********
@@ -474,22 +464,17 @@ void MyLBRClient::command()
     R = H.block< 3, 3 >( 0, 0 );
     p = H.block< 3, 1 >( 0, 3 );
 
-        //  Get initial transfomation of first iteration
-        if(currentTime < sampleTime)
-        {
-            H_ini = H;
-            R_ini = R;
-            p_ini = p;
-    
-            // Get initial AVP transformation
-            //H_avp_rw_ini = H_avp_rw;
-            //p_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 1 >( 0, 3 );
-            //R_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 3 >( 0, 0 );
-    
-            // ******************** NEW ******************** 
-            p_avp_rw_ini = p_avp_rw;
-            R_avp_rw_ini = R_avp_rw;
-        }
+    //  Get initial transfomation of first iteration
+    if(currentTime < sampleTime)
+    {
+        H_ini = H;
+        R_ini = R;
+        p_ini = p;
+
+        // Get initial AVP transformation
+        p_avp_rw_ini = p_avp_rw;
+        R_avp_rw_ini = R_avp_rw;
+    }
 
     // Jacobian, translational and rotation part
     //J = myLBR->getHybridJacobian( q, pointPosition );
@@ -536,7 +521,6 @@ void MyLBRClient::command()
     Eigen::Matrix3d del_R = R_avp_rw_ini.transpose() * R_avp_rw;                // Absolute rotation of apple vision pro
 
     Eigen::Matrix3d R_ee_des =  R.transpose() * R_ini * del_R;
-
 
     // Transform rotations to quaternions
     Eigen::Quaterniond Q(R_ee_des);
@@ -621,18 +605,18 @@ void MyLBRClient::command()
     // Write data in a file 
 
     // Buffer binary data
-    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
-    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
-    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
-    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
-    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+    //    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
+    //    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
+    //    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
+    //    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
+    //    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
 
-    // Periodic flush to file (e.g., every 1000 iterations)
-    if (buffer.str().size() > 4096) { // Write every 4KB of data
-        File_data.write(buffer.str().c_str(), buffer.str().size());
-        buffer.str("");  // Clear buffer
-        buffer.clear();
-    }
+    //    // Periodic flush to file (e.g., every 1000 iterations)
+    //    if (buffer.str().size() > 4096) { // Write every 4KB of data
+    //        File_data.write(buffer.str().c_str(), buffer.str().size());
+    //        buffer.str("");  // Clear buffer
+    //        buffer.clear();
+    //    }
 
 
     // ************************************************************
