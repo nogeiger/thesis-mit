@@ -130,10 +130,13 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // ************************************************************
     M = Eigen::MatrixXd::Zero( myLBR->nq, myLBR->nq );
     M_inv = Eigen::MatrixXd::Zero( myLBR->nq, myLBR->nq );
+
     pointPosition[0] = 0.0;
     pointPosition[1] = 0.0;
     pointPosition[2] = 0.085;
+
     bodyIndex = 7;
+    
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
 
@@ -180,25 +183,20 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     startPythonScript();
 
     // Transformation matrices of AVP
-    H_avp_11_ini = Eigen::MatrixXd::Identity( 4, 4 );
-    R_avp_11_ini = Eigen::MatrixXd::Identity( 3, 3 );
-    p_avp_11_ini = Eigen::VectorXd::Zero( 3 );
+    H_avp_rw_ini = Eigen::MatrixXd::Identity( 4, 4 );
+    R_avp_rw_ini = Eigen::MatrixXd::Identity( 3, 3 );
+    p_avp_rw_ini = Eigen::VectorXd::Zero( 3 );
 
-    p_avp_11 = Eigen::VectorXd::Zero( 3 );
-    p_avp_11_prev = Eigen::VectorXd::Zero( 3 );
-    p_avp_11_prev_prev = Eigen::VectorXd::Zero( 3 );
+    p_avp_rw = Eigen::VectorXd::Zero( 3 );
+    p_avp_rw_prev = Eigen::VectorXd::Zero( 3 );
+    p_avp_rw_prev_prev = Eigen::VectorXd::Zero( 3 );
 
-    R_avp_11 = Eigen::MatrixXd::Identity( 3, 3 );
-    R_avp_11_prev = Eigen::MatrixXd::Identity( 3, 3 );
-    R_avp_11_prev_prev = Eigen::MatrixXd::Identity( 3, 3 );
+    R_avp_rw = Eigen::MatrixXd::Identity( 3, 3 );
+    R_avp_rw_prev = Eigen::MatrixXd::Identity( 3, 3 );
+    R_avp_rw_prev_prev = Eigen::MatrixXd::Identity( 3, 3 );
 
     // # definitions can be found here: https://github.com/Improbable-AI/VisionProTeleop
-    matrix_25 = new double[16];                     // wrist
-    matrix_10 = new double[16];                     // finger metacarpal
-    matrix_11 = new double[16];                     // finger knuckle
-    matrix_12 = new double[16];                     // finger intermediate base
-    matrix_13 = new double[16];                     // finger intermediate tip
-    matrix_14 = new double[16];                     // finger tip
+    matrix_rw = new double[16];                     // wrist
 
     // ************************************************************
     // Store data
@@ -381,45 +379,44 @@ void MyLBRClient::command()
     }
 
     // Lock mutex and update local variables from shared memory
-    double* h_25;
+    double* h_rw;
 
     dataMutex.lock();
 
-    h_25 = matrix_25;
+    h_rw = matrix_rw;
 
     dataMutex.unlock();
 
     // Convert APV transformation to Eigen
-    Eigen::MatrixXd H_avp_25 = Eigen::Map<Eigen::MatrixXd>(h_25, 4, 4);                     // wrist
-
-    // Transformation of knuckle with respect to avp
-    Eigen::MatrixXd H_avp_11 = H_avp_25;
+    Eigen::MatrixXd H_avp_rw = Eigen::Map<Eigen::MatrixXd>(h_rw, 4, 4);         
 
     // Rotation of knuckle with respect to avp
-    R_avp_11 = H_avp_11.transpose().block< 3, 3 >( 0, 0 );
+    //R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
-    // For first iteration
-    if( currentTime < sampleTime )
-    {
-        R_avp_11_prev = R_avp_11;
-        R_avp_11_prev_prev = R_avp_11;
-    }
+    // ******************** NEW ********************  
+    R_avp_rw = H_avp_rw.block< 3, 3 >( 0, 0 );
 
     // A simple filter for the rotation
-    //    R_avp_11 = ( R_avp_11 + R_avp_11_prev + R_avp_11_prev_prev )R / 3;
+    //if( currentTime < sampleTime )
+    //{
+    //    R_avp_rw_prev = R_avp_rw;
+    //    R_avp_rw_prev_prev = R_avp_rw;
+    //}
+    //    R_avp_rw = ( R_avp_rw + R_avp_rw_prev + R_avp_rw_prev_prev )R / 3;
 
     // Positon of knuckle with respect to avp
-    p_avp_11 = H_avp_11.transpose().block< 3, 1 >( 0, 3 );
+    // p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
 
-    // For first iteration
-    if( currentTime < sampleTime )
-    {
-        p_avp_11_prev = p_avp_11;
-        p_avp_11_prev_prev = p_avp_11;
-    }
+    // ******************** NEW ********************  
+    p_avp_rw = H_avp_rw.block< 3, 1 >( 0, 3 );
 
-    // A simple filter for the rotation
-    //    p_avp_11 = ( p_avp_11 + p_avp_11_prev + p_avp_11_prev_prev ) / 3;
+    // A simple filter for the translation
+    //if( currentTime < sampleTime )
+    //{
+    //    p_avp_rw_prev = p_avp_rw;
+    //    p_avp_rw_prev_prev = p_avp_rw;
+    //}
+    //    p_avp_rw = ( p_avp_rw + p_avp_rw_prev + p_avp_rw_prev_prev ) / 3;
 
 
     // ****************************************************matrix********
@@ -469,10 +466,13 @@ void MyLBRClient::command()
         p_ini = H_ini.block< 3, 1 >( 0, 3 );
 
         // Get initial AVP transformation
-        H_avp_11_ini = H_avp_11;
-        p_avp_11_ini = H_avp_11_ini.transpose().block< 3, 1 >( 0, 3 );
-        R_avp_11_ini = H_avp_11_ini.transpose().block< 3, 3 >( 0, 0 );
+        H_avp_rw_ini = H_avp_rw;
+        //p_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 1 >( 0, 3 );
+        //R_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 3 >( 0, 0 );
 
+        // ******************** NEW ******************** 
+        p_avp_rw_ini = H_avp_rw_ini.block< 3, 1 >( 0, 3 );
+        R_avp_rw_ini = H_avp_rw_ini.block< 3, 3 >( 0, 0 );
     }
 
     // ************************************************************
@@ -503,12 +503,12 @@ void MyLBRClient::command()
     // ****************** Convert AVP displacement to robot coordinates ******************
 
     // Displacement from initial position
-    Eigen::VectorXd del_p_avp_11 = p_avp_11 - p_avp_11_ini;
+    Eigen::VectorXd del_p_avp_rw = p_avp_rw - p_avp_rw_ini;
 
     // Transform to homogeneous coordinates
-    Eigen::VectorXd del_p_avp_11_4d = Eigen::VectorXd::Zero(4, 1);
-    del_p_avp_11_4d[3] = 1;
-    del_p_avp_11_4d.head<3>() = del_p_avp_11;
+    Eigen::VectorXd del_p_avp_rw_4d = Eigen::VectorXd::Zero(4, 1);
+    del_p_avp_rw_4d[3] = 1;
+    del_p_avp_rw_4d.head<3>() = del_p_avp_rw;
 
     // Transformation to robot base coordinates
     Eigen::MatrixXd H_0_avp = Eigen::MatrixXd::Zero( 4, 4 );
@@ -516,7 +516,7 @@ void MyLBRClient::command()
     H_0_avp.block<3, 1>(0, 3) = p_ini;
 
     // Extract 3x1 position
-    Eigen::VectorXd p_0_4d = H_0_avp * del_p_avp_11_4d;
+    Eigen::VectorXd p_0_4d = H_0_avp * del_p_avp_rw_4d;
     Eigen::VectorXd p_0 = p_0_4d.block<3, 1>(0, 0);
 
 
@@ -526,7 +526,7 @@ void MyLBRClient::command()
     //Eigen::Matrix3d R_ee_des = R.transpose() * R_ini;
 
     // Change rotation based on Apple Vision Pro
-    Eigen::Matrix3d del_R = R_avp_11_ini.transpose() * R_avp_11;                // Absolute rotation of apple vision pro
+    Eigen::Matrix3d del_R = R_avp_rw_ini.transpose() * R_avp_rw;                // Absolute rotation of apple vision pro
 
     Eigen::Matrix3d R_ee_des =  R.transpose() * R_ini * del_R;
 
@@ -669,11 +669,11 @@ void MyLBRClient::command()
 
     currentTime = currentTime + sampleTime;
 
-    p_avp_11_prev = p_avp_11;
-    p_avp_11_prev_prev = p_avp_11_prev;
+    p_avp_rw_prev = p_avp_rw;
+    p_avp_rw_prev_prev = p_avp_rw_prev;
 
-    R_avp_11_prev = R_avp_11;
-    R_avp_11_prev_prev = R_avp_11_prev;
+    R_avp_rw_prev = R_avp_rw;
+    R_avp_rw_prev_prev = R_avp_rw_prev;
 
 }
 
@@ -697,19 +697,7 @@ void MyLBRClient::runStreamerThread() {
 
         // Define pointers based on shared memory layout
         int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
-        double* matrix_data_25 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                // First 4x4 matrix [0, :, :]
-        //        double* matrix_data_10 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 16 * sizeof(double)); // Second 4x4 matrix [1, :, :]
-        //        double* matrix_data_11 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 32 * sizeof(double)); // Third 4x4 matrix [2, :, :]
-        //double* matrix_data_12 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 48 * sizeof(double)); // Fourth 4x4 matrix [3, :, :]
-        //double* matrix_data_13 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 64 * sizeof(double)); // Fifth 4x4 matrix [4, :, :]
-        //double* matrix_data_14 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + 80 * sizeof(double)); // Sixth 4x4 matrix [5, :, :]
-
-        //        double* matrix_data_25 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-        //        double* matrix_data_10 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-        //        double* matrix_data_11 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-        //        double* matrix_data_12 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-        //        double* matrix_data_13 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
-        //        double* matrix_data_14 = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t)); // Next 128 bytes
+        double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                // First 4x4 matrix [0, :, :]
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
@@ -725,12 +713,7 @@ void MyLBRClient::runStreamerThread() {
 
                 dataMutex.lock();
 
-                matrix_25 = matrix_data_25;
-                //matrix_10 = matrix_data_10;
-                //matrix_11 = matrix_data_11;
-                //matrix_12 = matrix_data_12;
-                //matrix_13 = matrix_data_13;
-                //matrix_14 = matrix_data_14;
+                matrix_rw = matrix_data_rw;
 
                 dataMutex.unlock();
 

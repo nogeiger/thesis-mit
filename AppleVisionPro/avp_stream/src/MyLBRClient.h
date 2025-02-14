@@ -116,24 +116,19 @@ private:
     void runStreamerThread();
     void startPythonScript();
 
-    double* matrix_25;
-    double* matrix_10;
-    double* matrix_11;
-    double* matrix_12;
-    double* matrix_13;
-    double* matrix_14;
+    double* matrix_rw;
 
-    Eigen::MatrixXd H_avp_11_ini;
-    Eigen::MatrixXd R_avp_11_ini;
-    Eigen::VectorXd p_avp_11_ini;
+    Eigen::MatrixXd H_avp_rw_ini;
+    Eigen::MatrixXd R_avp_rw_ini;
+    Eigen::VectorXd p_avp_rw_ini;
 
-    Eigen::MatrixXd p_avp_11;
-    Eigen::MatrixXd p_avp_11_prev;
-    Eigen::MatrixXd p_avp_11_prev_prev;
+    Eigen::MatrixXd p_avp_rw;
+    Eigen::MatrixXd p_avp_rw_prev;
+    Eigen::MatrixXd p_avp_rw_prev_prev;
 
-    Eigen::MatrixXd R_avp_11;
-    Eigen::MatrixXd R_avp_11_prev;
-    Eigen::MatrixXd R_avp_11_prev_prev;
+    Eigen::MatrixXd R_avp_rw;
+    Eigen::MatrixXd R_avp_rw_prev;
+    Eigen::MatrixXd R_avp_rw_prev_prev;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
