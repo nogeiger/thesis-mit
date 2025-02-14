@@ -3,13 +3,14 @@ import numpy as np
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.29.171.74"  # Replace with your actual IP
+avp_ip = "10.31.153.17"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 
 # Define shared memory parameters
 SHM_NAME = "SharedMemory_AVP"
-SHM_SIZE = 8 + 6* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
+#SHM_SIZE = 8 + 3* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
+SHM_SIZE = 8 + 1* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
 
 # Create shared memory
 try:
@@ -21,7 +22,7 @@ except FileExistsError:
 
 # Define shared memory regions
 version = np.ndarray((1,), dtype=np.int64, buffer=shm.buf[:8])  # Ready flag
-data = np.ndarray((4, 4), dtype=np.float64, buffer=shm.buf[8:])  # 4x4 matrix
+data = np.ndarray((1, 4, 4), dtype=np.float64, buffer=shm.buf[8:])  # 4x4 matrix
 
 # Initialization
 version[0] = -1  # Indicate that Python is initializing
@@ -38,12 +39,13 @@ try:
 
         # Collect all data into a single numpy array (data_storage)
         data_storage = np.array([
-            r['right_wrist'],               # data_25
-            r['right_fingers'][10],         # data_10
-            r['right_fingers'][11],         # data_11
-            r['right_fingers'][12],         # data_12
-            r['right_fingers'][13],         # data_13
-            r['right_fingers'][14],         # data_14
+            r['right_wrist'][0],               # data_25
+            #r['right_fingers'][0],         # data_25
+            #r['right_fingers'][10],         # data_10
+            #r['right_fingers'][11],         # data_11
+            #r['right_fingers'][12],         # data_12
+            #r['right_fingers'][13],         # data_13
+            #r['right_fingers'][14],         # data_14
         ], dtype=np.float64)
 
         # Write data to shared memory only if Ready flag is 0

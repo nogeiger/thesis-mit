@@ -4,17 +4,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-<<<<<<< Updated upstream
-avp_ip = "10.29.171.74"  # Replace with your actual IP
-=======
 
-avp_ip = "10.29.158.147"  # Replace with your actual IP
->>>>>>> Stashed changes
+avp_ip = "10.31.153.17"  # Replace with your actual IP
 s = VisionProStreamer(ip=avp_ip, record=True)
+
 
 # Placeholder for translational data
 translations = []
-i=0
+
 
 # Open a text file for writing
 with open('streamed_data.txt', 'w') as f:
@@ -36,9 +33,9 @@ with open('streamed_data.txt', 'w') as f:
                 # Write data to the text file
                 f.write(f"Timestamp: {next_timestep:.6f}\n")
                 f.write(f"Right Wrist: {r['right_wrist'].tolist()}\n")
-                f.write(f"Right Finger Knuckle: {r['right_fingers'][11].tolist()}\n")
-                f.write(f"Right Finger intermediate base: {r['right_fingers'][12].tolist()}\n")
-                f.write(f"Right Finger tip: {r['right_fingers'][14].tolist()}\n")
+                #f.write(f"Right Finger Knuckle: {r['right_fingers'][11].tolist()}\n")
+                #f.write(f"Right Finger intermediate base: {r['right_fingers'][12].tolist()}\n")
+                #f.write(f"Right Finger tip: {r['right_fingers'][14].tolist()}\n")
                 f.write("\n")  # Separate each frame with a blank line
 
                 # Flush to ensure data is written immediately
@@ -46,38 +43,6 @@ with open('streamed_data.txt', 'w') as f:
 
                 # Update the next timestep
                 next_timestep += timestep
-
-                #for key in r.keys():
-                #    print(key)
-                #print("right_fingers 0 ", r['right_fingers'][0])
-                #print("right_fingers len ", len(r['right_fingers']))
-                #print("right_fingers 25", r['right_fingers'][24])
-                #print("right_wrist", r['right_wrist'])
-
-                # Get the right_wrist matrix
-                #right_wrist = r['right_wrist']
-
-                #print(r['right_fingers'][11])
-
-
-
-                matrix = r['right_fingers'][1]
-                    
-                # Extract the translational component (last column excluding the 1.0)
-                translation = [matrix[0][3], matrix[1][3], matrix[2][3]]
-                    
-                # Append the translation to the list
-                translations.append((i, translation))
-
-                i=+1
-                if i ==250:
-                    break
-
-                
-
-
-
-                
 
             # Sleep for a short duration to avoid busy waiting
             time.sleep(0.001)  # 1 ms sleep to reduce CPU usage

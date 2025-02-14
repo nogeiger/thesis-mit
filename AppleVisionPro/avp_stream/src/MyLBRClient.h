@@ -127,6 +127,14 @@ private:
     Eigen::MatrixXd R_avp_11_ini;
     Eigen::VectorXd p_avp_11_ini;
 
+    Eigen::MatrixXd p_avp_11;
+    Eigen::MatrixXd p_avp_11_prev;
+    Eigen::MatrixXd p_avp_11_prev_prev;
+
+    Eigen::MatrixXd R_avp_11;
+    Eigen::MatrixXd R_avp_11_prev;
+    Eigen::MatrixXd R_avp_11_prev_prev;
+
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
 
@@ -165,6 +173,7 @@ private:
     Eigen::MatrixXd H;
     Eigen::MatrixXd R;
     Eigen::Matrix3d R_z;
+    Eigen::Matrix3d R_avp_0;
     Eigen::MatrixXd J;
     
     Eigen::MatrixXd H_ini;
@@ -178,8 +187,8 @@ private:
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
-    // Eigen::MatrixXd Bp;
-    // Eigen::MatrixXd Br;
+    //     Eigen::MatrixXd Bp;
+    //     Eigen::MatrixXd Br;
     
 
     // Force-Torque Sensor
