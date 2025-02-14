@@ -105,6 +105,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     // Current joint configuration and velocity
     q  = Eigen::VectorXd::Zero( myLBR->nq );
+    q_ini = Eigen::VectorXd::Zero( myLBR->nq );
     dq = Eigen::VectorXd::Zero( myLBR->nq );
 
     // Time variables for control loop
@@ -159,6 +160,10 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Rotational stiffness
     Kr = Eigen::MatrixXd::Identity( 3, 3 );
     Kr = 150 * Kr;
+
+    // Rotational stiffness
+    Kq = Eigen::MatrixXd::Identity( 7, 7 );
+    Kq = 10 * Kq;
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
@@ -486,11 +491,13 @@ void MyLBRClient::command()
     // Adapt mass matrix to prevent high accelerations at last joint
     M = myLBR->getMassMatrix( q );
     M( 6, 6 ) = 40 * M( 6, 6 );
+    Eigen::MatrixXd M_inv = M.inverse();
 
     // Cartesian mass matrix
     double k = 0.01;
-    Eigen::Matrix3d Lambda_v = getLambdaLeastSquares(M, J_v, k);
-    Eigen::Matrix3d Lambda_w = getLambdaLeastSquares(M, J_w, k);
+    Eigen::MatrixXd Lambda = getLambdaLeastSquares(M, J, k);
+    Eigen::MatrixXd Lambda_v = getLambdaLeastSquares(M, J_v, k);
+    Eigen::MatrixXd Lambda_w = getLambdaLeastSquares(M, J_w, k);
 
     // ****************** Convert AVP displacement to robot coordinates ******************
 
@@ -591,8 +598,15 @@ void MyLBRClient::command()
 
 
     // ************************************************************
+    // Nullspace joint space stiffness
+    Eigen::VectorXd J_bar = M_inv * J.transpose() * Lambda;
+    Eigen::VectorXd N = Eigen::MatrixXd::Identity(7, 7) - J.transpose() * J_bar.transpose();
+
+    Eigen::VectorXd tau_kq = Kq * (q_ini - q);
+
+    // ************************************************************
     // Control torque
-    tau_motion = tau_translation + tau_rotation;
+    tau_motion = tau_translation + tau_rotation + (N * tau_kq);
 
     // Comment out for only gravity compensation
     //    tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
@@ -807,11 +821,11 @@ double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t,
 * \brief Function to compute damping factor, applied to stiffness matrix
 *
 */
-Eigen::Matrix3d MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J_3D, double k)
+Eigen::MatrixXd MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k)
 {
 
-    Eigen::Matrix3d Lambda_Inv = J_3D * M.inverse() * J_3D.transpose() + ( k * k ) * Eigen::MatrixXd::Identity( 3, 3 );
-    Eigen::Matrix3d Lambda = Lambda_Inv.inverse();
+    Eigen::MatrixXd Lambda_Inv = J * M.inverse() * J.transpose() + ( k * k ) * Eigen::MatrixXd::Identity( J.rows(), J.rows() );
+    Eigen::MatrixXd Lambda = Lambda_Inv.inverse();
     return Lambda;
 
 }

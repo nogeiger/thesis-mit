@@ -154,6 +154,7 @@ private:
 
     // Current position and velocity as Eigen vector
     Eigen::VectorXd q;
+    Eigen::VectorXd q_ini;
     Eigen::VectorXd dq;
 
     // Command torque vectors (with and without constraints)
@@ -179,6 +180,7 @@ private:
     
     Eigen::MatrixXd Kp;
     Eigen::MatrixXd Kr;
+    Eigen::MatrixXd Kq;
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
@@ -210,7 +212,7 @@ private:
 
     // Damping design
     double compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor);
-    Eigen::Matrix3d getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J_3D, double k);
+    Eigen::MatrixXd getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k)
 
 
     // Files to store data
