@@ -136,7 +136,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     pointPosition[2] = 0.085;
 
     bodyIndex = 7;
-    
+
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
 
@@ -396,6 +396,13 @@ void MyLBRClient::command()
     // ******************** NEW ********************  
     R_avp_rw = H_avp_rw.block< 3, 3 >( 0, 0 );
 
+     
+    Eigen::MatrixXd R_corrected = R_avp_rw;
+    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
+    R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
+    R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
+
+    R_avp_rw = R_corrected;
     // A simple filter for the rotation
     //if( currentTime < sampleTime )
     //{
@@ -458,23 +465,6 @@ void MyLBRClient::command()
         dq[i] = (qCurr[i] - qOld[i]) / sampleTime;
     }
 
-    //  Get initial transfomation of first iteration
-    if(currentTime < sampleTime)
-    {
-        H_ini = myLBR->getForwardKinematics( q );
-        R_ini = H_ini.block< 3, 3 >( 0, 0 );
-        p_ini = H_ini.block< 3, 1 >( 0, 3 );
-
-        // Get initial AVP transformation
-        H_avp_rw_ini = H_avp_rw;
-        //p_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 1 >( 0, 3 );
-        //R_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 3 >( 0, 0 );
-
-        // ******************** NEW ******************** 
-        p_avp_rw_ini = H_avp_rw_ini.block< 3, 1 >( 0, 3 );
-        R_avp_rw_ini = H_avp_rw_ini.block< 3, 3 >( 0, 0 );
-    }
-
     // ************************************************************
     // Calculate kinematics and dynamics
 
@@ -483,6 +473,23 @@ void MyLBRClient::command()
     H = myLBR->getForwardKinematics( q );
     R = H.block< 3, 3 >( 0, 0 );
     p = H.block< 3, 1 >( 0, 3 );
+
+        //  Get initial transfomation of first iteration
+        if(currentTime < sampleTime)
+        {
+            H_ini = H;
+            R_ini = R;
+            p_ini = p;
+    
+            // Get initial AVP transformation
+            //H_avp_rw_ini = H_avp_rw;
+            //p_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 1 >( 0, 3 );
+            //R_avp_rw_ini = H_avp_rw_ini.transpose().block< 3, 3 >( 0, 0 );
+    
+            // ******************** NEW ******************** 
+            p_avp_rw_ini = p_avp_rw;
+            R_avp_rw_ini = R_avp_rw;
+        }
 
     // Jacobian, translational and rotation part
     //J = myLBR->getHybridJacobian( q, pointPosition );
