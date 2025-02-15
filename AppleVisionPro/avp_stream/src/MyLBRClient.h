@@ -181,6 +181,7 @@ private:
     Eigen::MatrixXd Kp;
     Eigen::MatrixXd Kr;
     Eigen::MatrixXd Kq;
+    Eigen::MatrixXd Bq;
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
@@ -212,7 +213,7 @@ private:
 
     // Damping design
     double compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor);
-    Eigen::MatrixXd getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k)
+    Eigen::MatrixXd getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k);
 
 
     // Files to store data

@@ -129,8 +129,8 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // ************************************************************
     // INITIALIZE YOUR VECTORS AND MATRICES HERE
     // ************************************************************
-    M = Eigen::MatrixXd::Zero( myLBR->nq, myLBR->nq );
-    M_inv = Eigen::MatrixXd::Zero( myLBR->nq, myLBR->nq );
+    M = Eigen::MatrixXd::Zero( 7, 7 );
+    M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
     pointPosition[0] = 0.0;
     pointPosition[1] = 0.0;
@@ -151,7 +151,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     p_0_ini = Eigen::VectorXd::Zero( 3, 1 );
     p = Eigen::VectorXd::Zero( 3, 1 );
 
-    J = Eigen::MatrixXd::Zero( 6, myLBR->nq );
+    J = Eigen::MatrixXd::Zero( 6, 7 );
 
     // Translational stiffness
     Kp = Eigen::MatrixXd::Identity( 3, 3 );
@@ -161,9 +161,13 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     Kr = Eigen::MatrixXd::Identity( 3, 3 );
     Kr = 150 * Kr;
 
-    // Rotational stiffness
+    // Joint space stiffness
     Kq = Eigen::MatrixXd::Identity( 7, 7 );
-    Kq = 10 * Kq;
+    Kq = 8 * Kq;
+
+    // Joint space damping
+    Bq = Eigen::MatrixXd::Identity( 7, 7 );
+    Bq = 0.5 * Bq;
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
@@ -479,6 +483,9 @@ void MyLBRClient::command()
         // Get initial AVP transformation
         p_avp_rw_ini = p_avp_rw;
         R_avp_rw_ini = R_avp_rw;
+
+        // Get initial q
+        q_ini = q;
     }
 
     // Jacobian, translational and rotation part
@@ -570,7 +577,8 @@ void MyLBRClient::command()
     // Damping design
     double damping_factor_v = 0.7;
     Eigen::Vector3d Kp_diag = Kp.diagonal();
-    double alpha_v = compute_alpha(Lambda_v, Kp_diag, damping_factor_v);
+    Eigen::Matrix3d Lambda_v_3d = Lambda_v;
+    double alpha_v = compute_alpha(Lambda_v_3d, Kp_diag, damping_factor_v);
     Eigen::MatrixXd Bp = alpha_v * Kp;
 
     // Calculate force
@@ -587,7 +595,8 @@ void MyLBRClient::command()
     // Damping design
     double damping_factor_r = 0.7;
     Eigen::Vector3d Kr_diag = Kr.diagonal();
-    double alpha_w = compute_alpha(Lambda_w, Kr_diag, damping_factor_r);
+    Eigen::Matrix3d Lambda_w_3d = Lambda_w;
+    double alpha_w = compute_alpha(Lambda_w_3d, Kr_diag, damping_factor_r);
     Eigen::MatrixXd Br = alpha_w * Kr;
 
     // Calculate moment
@@ -599,14 +608,15 @@ void MyLBRClient::command()
 
     // ************************************************************
     // Nullspace joint space stiffness
-    Eigen::VectorXd J_bar = M_inv * J.transpose() * Lambda;
-    Eigen::VectorXd N = Eigen::MatrixXd::Identity(7, 7) - J.transpose() * J_bar.transpose();
+    Eigen::MatrixXd J_bar = M_inv * J.transpose() * Lambda;
 
-    Eigen::VectorXd tau_kq = Kq * (q_ini - q);
+    Eigen::MatrixXd N = Eigen::MatrixXd::Identity(7, 7) - J.transpose() * J_bar.transpose();
+
+    Eigen::VectorXd tau_q = Kq * (q_ini - q) - Bq * dq;
 
     // ************************************************************
     // Control torque
-    tau_motion = tau_translation + tau_rotation + (N * tau_kq);
+    tau_motion = tau_translation + tau_rotation + (N * tau_q);
 
     // Comment out for only gravity compensation
     //    tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
@@ -789,9 +799,9 @@ void MyLBRClient::forceSensorThread()
 * \brief Function to compute damping factor, applied to stiffness matrix
 *
 */
-double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor)
+double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lam, Eigen::Vector3d& k_t, double damping_factor)
 {
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(Lambda);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(Lam);
     Eigen::Matrix3d U = solver.eigenvectors();
     Eigen::Matrix3d Sigma = solver.eigenvalues().asDiagonal();
 
@@ -823,10 +833,10 @@ double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t,
 */
 Eigen::MatrixXd MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k)
 {
+    Eigen::MatrixXd Lam_Inv = J * M.inverse() * J.transpose() + ( k * k ) * Eigen::MatrixXd::Identity( J.rows(), J.rows() );
+    Eigen::MatrixXd Lam = Lam_Inv.inverse();
 
-    Eigen::MatrixXd Lambda_Inv = J * M.inverse() * J.transpose() + ( k * k ) * Eigen::MatrixXd::Identity( J.rows(), J.rows() );
-    Eigen::MatrixXd Lambda = Lambda_Inv.inverse();
-    return Lambda;
+    return Lam;
 
 }
 
