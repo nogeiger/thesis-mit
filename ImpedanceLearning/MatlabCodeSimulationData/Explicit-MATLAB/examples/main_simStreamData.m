@@ -1,7 +1,6 @@
-% [Project]        Robot Simulator - Snake
+% [Project]        Stream data from Apple Vision Pro
 % Authors                       Email
 %   [1] Johannes Lachner        jlachner@mit.edu
-%   [2] Moses C. Nah            mosesnah@mit.edu
 %
 %
 % The code is heavily commented. A famous quote says:
@@ -11,83 +10,134 @@
 %% Cleaning up + Environment Setup
 clear; close all; clc;
 
+% %% Read out data
+% % Open the text file
+% filename = 'streamed_data.txt'; % Replace with your file name
+% fid = fopen(filename, 'r');
+% 
+% % Check if the file was successfully opened
+% if fid == -1
+%     error('Failed to open file: %s', filename);
+% end
+% 
+% % Initialize variables
+% t_record = []; % Store all timestamps
+% H_record = [];   % Store all transformation matrices
+% i = 1;
+% j = 1;
+% 
+% % Read file line by line
+% while ~feof(fid)
+%     % Read the current line
+%     line = strtrim(fgetl(fid));
+% 
+%     % Check for the timestamp line
+%     if startsWith(line, 'Timestamp:')
+%         % Extract and convert the timestamp
+%         t_str = extractAfter(line, 'Timestamp:');
+%         current_time = str2double(strtrim(t_str));
+%         t_record(i) = current_time; %#ok<SAGROW>
+% 
+%         i = i+1;
+% 
+%     end
+% 
+%     % Check for the transformation matrix line
+%     if startsWith(line, 'Right Wrist:')
+%         % Extract the transformation matrix
+%         matrix_str = extractAfter(line, 'Right Wrist:');
+%         matrix_values = str2num(matrix_str); %#ok<ST2NM>
+% 
+%         % Check if we have exactly 16 elements
+%         if numel(matrix_values) == 16
+%             % Reshape to 4x4 and transpose to match row-major order
+%             H_record(:, :, j) = reshape(matrix_values, [4, 4])'; %#ok<SAGROW>
+%         else
+%             warning('Unexpected number of elements in transformation matrix: %d', numel(matrix_values));
+%         end
+% 
+%         j = j+1;
+%     end
+% 
+% end
+% 
+% % Close the file
+% fclose(fid);
+% 
+% % Display results
+% disp('Total Timestamps Extracted:');
+% disp(numel(t_record));
+% disp('Total Transformation Matrices Extracted:');
+% disp(size(H_record, 3));
+% 
+% % Rotations
+% for k=1:length(H_record)
+%     H_streamed(:, :, k) = H_record(1:4, 1:4, k);
+% end
+
 %% Read out data
-% Open the text file
-filename = 'streamed_data.txt'; % Replace with your file name
+
+
+filename = 'right_wrist_matrices.txt';
 fid = fopen(filename, 'r');
 
-% Check if the file was successfully opened
 if fid == -1
     error('Failed to open file: %s', filename);
 end
 
-% Initialize variables
-t_record = []; % Store all timestamps
-H_record = [];   % Store all transformation matrices
-i = 1;
+H_streamed = [];
 j = 1;
 
-% Read file line by line
-while ~feof(fid)
-    % Read the current line
-    line = strtrim(fgetl(fid));
-
-    % Check for the timestamp line
-    if startsWith(line, 'Timestamp:')
-        % Extract and convert the timestamp
-        t_str = extractAfter(line, 'Timestamp:');
-        current_time = str2double(strtrim(t_str));
-        t_record(i) = current_time; %#ok<SAGROW>
-
-        i = i+1;
-
-    end
-
-    % Check for the transformation matrix line
-    if startsWith(line, 'Right Wrist:')
-        % Extract the transformation matrix
-        matrix_str = extractAfter(line, 'Right Wrist:');
-        matrix_values = str2num(matrix_str); %#ok<ST2NM>
-
-        % Check if we have exactly 16 elements
-        if numel(matrix_values) == 16
-            % Reshape to 4x4 and transpose to match row-major order
-            H_record(:, :, j) = reshape(matrix_values, [4, 4])'; %#ok<SAGROW>
-        else
-            warning('Unexpected number of elements in transformation matrix: %d', numel(matrix_values));
-        end
-
-        j = j+1;
-    end
-
-end
-
-% Close the file
+% Read the entire file as one string
+file_content = fscanf(fid, '%c');
 fclose(fid);
 
-% Display results
-disp('Total Timestamps Extracted:');
-disp(numel(t_record));
-disp('Total Transformation Matrices Extracted:');
-disp(size(H_record, 3));
+% Extract the part after "Doubles:"
+start_index = strfind(file_content, 'Doubles:') + length('Doubles:');
+doubles_str = file_content(start_index:end);
 
-% Rotations
-for k=1:length(H_record)
-    H_streamed(:, :, k) = H_record(1:4, 1:4, k);
+% Replace commas with spaces and convert to numbers
+doubles_str = strrep(doubles_str, ',', ' ');
+matrix_values = str2num(doubles_str); %#ok<ST2NM>
+
+% Process values: 16 doubles for each H_streamed, skip 1 timestamp
+num_blocks = floor(numel(matrix_values) / 17); % 16 values + 1 timestamp each block
+
+for k = 1:num_blocks
+    start_idx = (k-1)*17 + 1;
+    end_idx = start_idx + 15;  % Take 16 values for the matrix
+    matrix_data = reshape(matrix_values(start_idx:end_idx), [4,4])';
+    H_streamed(:, :, j) = matrix_data;
+    j = j + 1;
 end
+
+disp('Total Transformation Matrices Extracted:');
+disp(size(H_streamed, 3));
+
+
+% Swap Y and Z axes in the rotation matrices
+for idx = 1:size(H_streamed, 3)
+    R_corrected = H_streamed(1:3,1:3,idx);
+    R_corrected = R_corrected(:, [1 3 2]);  % Swap Y and Z columns
+    R_corrected(:, 2) = -R_corrected(:, 2); % Invert the new Y axis
+    H_streamed(1:3,1:3,idx) = R_corrected;
+end
+
+
 
 %% Simulation settings
 % simTime = 5;        % Total simulation time
-simTime = t_record( end );
+simTime = size(H_streamed, 3) * 0.005;
 t  = 0;             % The current time of simulation
-dt = 0.005;          % Time-step of simulation
+dt = 0.001;          % Time-step of simulation
 
 % Set figure size and attach robot to simulation
-robot = iiwa14( 'high' );
+robot = iiwa14( 'low' );
 robot.init( );
 
 % Initial joint values
 q = robot.q_init;
+q_ini = q;
 dq = zeros( robot.nq, 1 );
 nq = robot.nq;
 
@@ -140,19 +190,6 @@ patchTCPeef = patch('Faces', F,    'Vertices' ,V, 'FaceVertexCData', C, 'FaceC',
 H_start = H_ini;
 set(hg, 'matrix', H_start)
 
-% Desired rotation
-% [VFC_0{1:3}]= func_create_VFC_data('Koordinatensystem',14);
-% VFC_0{1} = VFC_0{1} / 4;
-% 
-% [V_0,F_0,C_0] = VFC_0{:};
-% patchTCPeef = patch('Faces', F_0,    'Vertices' ,V_0, 'FaceVertexCData', C_0, 'FaceC', 'flat',...
-%     'EdgeColor','none', 'Parent', hg_0, 'faceAlpha', 1, 'tag', 'TCP');
-% 
-% H_end = H_ini;
-% % H_end(1:3,1:3) = ( R_ini * R_traj(:,:,1)' ) * R_traj(:,:,numSteps);
-% H_end(1:3,1:3) = R_ini * H_streamed(1:3,1:3,1)' * H_streamed(1:3,1:3, length(t_record) );
-% set(hg_0, 'matrix', H_end)
-
 %% Init animation
 anim.update(0);
 step = 1;
@@ -180,6 +217,7 @@ while t <= simTime
     % Mass matrix
     M = robot.getMassMatrix( q );
     M(7,7) = 40 * M(7,7);
+    M_inv = M \ eye( size( M ) );
 
     % Translational impedance control
     kp_t = 800;
@@ -200,7 +238,7 @@ while t <= simTime
     tau_t = J_t' * f;
 
     % Recorded Rotations
-    %del_R = R_traj(:,:,1)' * R_traj(:,:,step);
+    %R_rel = [ 1, 0, 0; 0, 0, 1; 0, 1, 0 ]; 
     del_R = H_streamed(1:3,1:3,1)' * H_streamed(1:3,1:3,step);
     R_ee_des = R' * R_ini * del_R;
 
@@ -216,10 +254,18 @@ while t <= simTime
     m = kp_r * u_0_des * phi - kd_r * w;
     tau_r = J_r' * m;
 
-    tau_q = -0.4 * dq;
+    % Joint space stiffness
+    kq = 2;
+    tau_q = kq * ( q_ini - q );
+
+    % Nullspace projector
+    minSingVal = 0.02;
+    Lambda = func_getLambdaLeastSquaresAndSqrt( M, J, minSingVal );
+    J_bar = M_inv * J' * Lambda;
+    N = eye( robot.nq ) - J' * J_bar';
 
     % Interpolation robot
-    rhs = M \ ( tau_t + tau_r + tau_q );                                                % We assume gravity and Coriolis are compensated
+    rhs = M \ ( tau_t + tau_r + (N * tau_q) );                                                % We assume gravity and Coriolis are compensated
     [ q, dq ] = func_symplecticEuler( q, dq, rhs, dt );
 
     % Updates
