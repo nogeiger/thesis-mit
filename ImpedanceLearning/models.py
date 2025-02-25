@@ -19,6 +19,7 @@ class NoisePredictorInitial(nn.Module):
     def __init__(self, seq_length, hidden_dim, use_time =False, use_forces=False):
         super(NoisePredictorInitial, self).__init__()
         self.use_forces = use_forces
+        print(use_time)
         self.use_time = use_time
         input_dim = seq_length * 3  # Clean and noisy trajectories (pos_0 and pos)
         
@@ -27,15 +28,13 @@ class NoisePredictorInitial(nn.Module):
 
         # Time step processing (if enabled)
         if self.use_time:
-            self.time_layer = nn.Linear(1, hidden_dim)  # Separate layer for time step
+            self.time_layer = nn.Linear(1, seq_length)  # Separate layer for time step
             self.time_relu = nn.ReLU()
-            time_output_dim = hidden_dim
-        else:
-            time_output_dim = 0
+            input_dim += seq_length * 1  # Add time step as an extra feature
 
-        #input_dim+= 1 #for time step t 
 
-        self.input_layer = nn.Linear(input_dim +time_output_dim, hidden_dim)
+
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_3 = nn.Linear(hidden_dim, hidden_dim)
@@ -67,12 +66,15 @@ class NoisePredictorInitial(nn.Module):
         else:
             x = noisy_trajectory
 
+        
+        # Process time step (if enabled)
+        if self.use_time:
+            t_processed = self.time_relu(self.time_layer(t)).unsqueeze(1).unsqueeze(0).repeat(batch_size,1,1)  # Process time step
+            x = torch.cat((x, t_processed), dim=-1)  # Concatenate processed time step with input
+
+
         x = x.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 6] if forces are included
 
-        # Process time step (if enabled)
-        if self.use_time and t is not None:
-            t_processed = self.time_relu(self.time_layer(t))  # Process time step
-            x = torch.cat((x, t_processed), dim=-1)  # Concatenate processed time step with input
 
         # Pass through the network
         x = self.input_layer(x)

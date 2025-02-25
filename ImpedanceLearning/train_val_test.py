@@ -35,6 +35,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
     Returns:
         list: List of average losses for each epoch.
     """
+    print(use_time)
     train_epoch_losses = []
     val_epoch_losses = []
 
