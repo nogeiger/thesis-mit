@@ -132,11 +132,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    pointPosition[0] = 0.0;
-    pointPosition[1] = 0.0;
-    pointPosition[2] = 0.085;
-
-    bodyIndex = 7;
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
@@ -255,9 +251,9 @@ MyLBRClient::~MyLBRClient()
     delete myLBR;
     delete this->ftSensor;
 
-    //    if (File_data.is_open()) {
-    //        File_data.close();
-    //    }
+    if (File_data.is_open()) {
+        File_data.close();
+    }
 
 }
 
@@ -399,9 +395,13 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
-    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
-    R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
-    R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
+//    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
+//    R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
+//    R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
+
+    R_corrected.col(0) = -R_avp_rw.col(0);        // X remains the same
+    R_corrected.col(1) = R_avp_rw.col(2);       // Z becomes Y (inverted)
+    R_corrected.col(2) = -R_avp_rw.col(1);        // Y becomes Z
 
     R_avp_rw = R_corrected;
 
@@ -468,8 +468,8 @@ void MyLBRClient::command()
     // Calculate kinematics and dynamics
 
     // Transformation and Rotation Matrix
-    //    H = myLBR->getForwardKinematics( q, bodyIndex, pointPosition );
-    H = myLBR->getForwardKinematics( q );
+    // H = myLBR->getForwardKinematics( q );
+    H = myLBR->getForwardKinematics( q, 7, pointPosition );
     R = H.block< 3, 3 >( 0, 0 );
     p = H.block< 3, 1 >( 0, 3 );
 
@@ -489,8 +489,8 @@ void MyLBRClient::command()
     }
 
     // Jacobian, translational and rotation part
-    //J = myLBR->getHybridJacobian( q, pointPosition );
-    J = myLBR->getHybridJacobian( q );
+    // J = myLBR->getHybridJacobian( q );
+    J = myLBR->getHybridJacobian( q, pointPosition );
     Eigen::MatrixXd J_v = J.block(0, 0, 3, 7);
     Eigen::MatrixXd J_w = J.block(3, 0, 3, 7);
 
@@ -510,6 +510,10 @@ void MyLBRClient::command()
 
     // Displacement from initial position
     Eigen::VectorXd del_p_avp_rw = p_avp_rw - p_avp_rw_ini;
+
+    // Apply scaling factor
+    double scaleFactTranslation = 0.7; // Adjust as needed
+    del_p_avp_rw /= scaleFactTranslation;
 
     // Transform to homogeneous coordinates
     Eigen::VectorXd del_p_avp_rw_4d = Eigen::VectorXd::Zero(4, 1);
@@ -548,7 +552,7 @@ void MyLBRClient::command()
     }
 
     // Scale desired angle
-    int scaleFact = 1;
+    int scaleFact = 2;
     theta = theta / scaleFact;
 
     // Compute norm factor, handle edge case for small theta
@@ -629,18 +633,18 @@ void MyLBRClient::command()
     // Write data in a file 
 
     // Buffer binary data
-    //    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
-    //    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
-    //    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
-    //    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
-    //    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
+    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
+    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
 
-    //    // Periodic flush to file (e.g., every 1000 iterations)
-    //    if (buffer.str().size() > 4096) { // Write every 4KB of data
-    //        File_data.write(buffer.str().c_str(), buffer.str().size());
-    //        buffer.str("");  // Clear buffer
-    //        buffer.clear();
-    //    }
+    // Periodic flush to file (e.g., every 1000 iterations)
+    if (buffer.str().size() > 4096) { // Write every 4KB of data
+        File_data.write(buffer.str().c_str(), buffer.str().size());
+        buffer.str("");  // Clear buffer
+        buffer.clear();
+    }
 
 
     // ************************************************************
