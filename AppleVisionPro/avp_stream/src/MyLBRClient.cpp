@@ -399,7 +399,7 @@ void MyLBRClient::command()
 //    R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
 //    R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
 
-    R_corrected.col(0) = -R_avp_rw.col(0);        // X remains the same
+    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
     R_corrected.col(1) = R_avp_rw.col(2);       // Z becomes Y (inverted)
     R_corrected.col(2) = -R_avp_rw.col(1);        // Y becomes Z
 
