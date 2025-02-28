@@ -150,16 +150,34 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     J = Eigen::MatrixXd::Zero( 6, 7 );
 
     // Translational stiffness
-    Kp = Eigen::MatrixXd::Identity( 3, 3 );
-    Kp = 400 * Kp;
-
-    // Rotational stiffness
-    Kr = Eigen::MatrixXd::Identity( 3, 3 );
-    Kr = 150 * Kr;
-
-    // Joint space stiffness
-    Kq = Eigen::MatrixXd::Identity( 7, 7 );
+    Kp = Eigen::MatrixXd::Identity( 3, 3 );                 // Translational stiffness
+    Kr = Eigen::MatrixXd::Identity( 3, 3 );                 // Rotational stiffness
+    Kq = Eigen::MatrixXd::Identity( 7, 7 );                 // Nullpace stiffness (no need to change!)
     Kq = 8 * Kq;
+
+ 
+    // *********************************
+    // Define stiffness categories here   
+    std:string stiffness_cat = "medium";
+
+    if (stiffness_cat == "low") {
+        // Low stiffness
+        printf( "Selected stiffness category: low. \n\n" );
+        Kp = 350 * Kp;
+        Kr = 30 * Kr;  
+    }
+    if (stiffness_cat == "medium") {
+        // Med stiffness
+        printf( "Selected stiffness category: medium. \n\n" );
+        Kp = 650 * Kp;
+        Kr = 100 * Kr;  
+    }
+    if (stiffness_cat == "high") {
+        // High stiffness
+        printf( "Selected stiffness category: high. \n\n" );
+        Kp = 850 * Kp;
+        Kr = 150 * Kr;  
+    } 
 
     // Joint space damping
     Bq = Eigen::MatrixXd::Identity( 7, 7 );
@@ -720,11 +738,11 @@ void MyLBRClient::runStreamerThread() {
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
-            std::cout << "Waiting for Python to initialize..." << std::endl;
+            std::cout << "Waiting for Python to initialize...  \n\n" << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
-        std::cout << "Python initialized. Starting processing..." << std::endl;
+        std::cout << "Python initialized. Starting processing...  \n\n" << std::endl;
 
         int timeout_counter = 0;
         while (true) {

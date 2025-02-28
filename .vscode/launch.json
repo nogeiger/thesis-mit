@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug avp_stream",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build/Debug/avp_stream",
+            "args": [],
+            "cwd": "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/build/Debug",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "description": "Enable GDB pretty printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake Build"
+        }
+    ]
+}
