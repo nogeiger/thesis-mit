@@ -162,22 +162,27 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     if (stiffness_cat == "low") {
         // Low stiffness
-        printf( "Selected stiffness category: low. \n\n" );
+        printf("Selected stiffness category: low.\n\n");
         Kp = 350 * Kp;
-        Kr = 30 * Kr;  
-    }
-    if (stiffness_cat == "medium") {
-        // Med stiffness
-        printf( "Selected stiffness category: medium. \n\n" );
-        Kp = 650 * Kp;
-        Kr = 100 * Kr;  
-    }
-    if (stiffness_cat == "high") {
-        // High stiffness
-        printf( "Selected stiffness category: high. \n\n" );
-        Kp = 850 * Kp;
-        Kr = 150 * Kr;  
+        Kr = 30 * Kr;
     } 
+    else if (stiffness_cat == "medium") {
+        // Medium stiffness
+        printf("Selected stiffness category: medium.\n\n");
+        Kp = 650 * Kp;
+        Kr = 100 * Kr;
+    } 
+    else if (stiffness_cat == "high") {
+        // High stiffness
+        printf("Selected stiffness category: high.\n\n");
+        Kp = 850 * Kp;
+        Kr = 150 * Kr;
+    } 
+    else {
+        // Error message for invalid input
+        printf("Error: Invalid stiffness category selected.\n\n");
+    }
+    
 
     // Joint space damping
     Bq = Eigen::MatrixXd::Identity( 7, 7 );
