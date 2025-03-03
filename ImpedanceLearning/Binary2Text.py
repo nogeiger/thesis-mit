@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import glob
 
-# File paths
-binary_file = "File_data.bin"  # Update with correct path
-text_file = "File_data.txt"  # Output readable text file
+# Directory containing .bin files
+binary_folder = "Data/"  # Update if needed
 
 # Define the correct number of categories (columns)
 column_count = 13  # We confirmed earlier
@@ -16,23 +18,49 @@ column_names = [
     "x0", "y0", "z0"
 ]
 
-# Read the binary file as double-precision floats (float64)
-data = np.fromfile(binary_file, dtype=np.float64)
+# Find all .bin files in the directory
+bin_files = glob.glob(os.path.join(binary_folder, "*.bin"))
 
-# Reshape data into the correct structure
-if len(data) % column_count != 0:
-    print("Error: Data length is not a multiple of 13. Check binary structure.")
-    exit()
+# Process each .bin file
+for binary_file in bin_files:
+    # Construct output .txt file name
+    text_file = binary_file.replace(".bin", ".txt")
 
-data = data.reshape(-1, column_count)  # Reshape into rows with 13 columns
+    # Read the binary file as double-precision floats (float64)
+    data = np.fromfile(binary_file, dtype=np.float64)
 
-# Convert to Pandas DataFrame with column names
-df = pd.DataFrame(data, columns=column_names)
+    # Reshape data into the correct structure
+    if len(data) % column_count != 0:
+        print(f"Error: Data length in {binary_file} is not a multiple of {column_count}. Skipping this file.")
+        continue
 
-# Print a preview of the data
-print(df.head())  # Shows the first few rows
+    data = data.reshape(-1, column_count)  # Reshape into rows with 13 columns
 
-# Save to a readable text file (CSV format, tab-separated)
-df.to_csv(text_file, sep="\t", index=False)
+    # Convert to Pandas DataFrame with column names
+    df = pd.DataFrame(data, columns=column_names)
 
-print(f"Binary file successfully converted to {text_file} with column names.")
+    # Save to a readable text file (CSV format, tab-separated)
+    df.to_csv(text_file, sep="\t", index=False)
+
+    print(f"Converted {binary_file} to {text_file} successfully.")
+
+    # 3D Trajectory Plot
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111, projection='3d')
+
+    # Plot the trajectory using x, y, z
+    #ax.plot(df["x"], df["y"], df["z"], label=f"Trajectory ({os.path.basename(binary_file)})", color="b")
+
+    # Labels
+    #ax.set_xlabel("X Position")
+    #ax.set_ylabel("Y Position")
+    #ax.set_zlabel("Z Position")
+    #ax.set_title(f"3D Trajectory Plot: {os.path.basename(binary_file)}")
+
+    # Show legend
+    #ax.legend()
+
+    # Show plot
+    #plt.show()
+
+print("Processing completed for all .bin files.")
