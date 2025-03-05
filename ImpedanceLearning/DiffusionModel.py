@@ -11,7 +11,7 @@ from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTran
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
-
+from datetime import datetime
 
 def main():
     """
@@ -23,7 +23,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 512#512(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size = 64 #batch size
-    num_epochs = 500 #number of epochs
+    num_epochs = 1#500 #number of epochs
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -38,6 +38,24 @@ def main():
     early_stop_patience = 50 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    hyperparams = {
+    "seq_length": seq_length,
+    "hidden_dim": hidden_dim,
+    "batch_size": batch_size,
+    "num_epochs": num_epochs,
+    "learning_rate": learning_rate,
+    "noiseadding_steps": noiseadding_steps,
+    "use_forces": use_forces,
+    "noise_with_force": noise_with_force,
+    "beta_start": beta_start,
+    "beta_end": beta_end,
+    "max_grad_norm": max_grad_norm,
+    "add_gaussian_noise": add_gaussian_noise,
+    "early_stop_patience": early_stop_patience
+    }
+
 
     # File path to the real data
     file_path = "Data/1D_diffusion_large_multiple"
@@ -79,9 +97,9 @@ def main():
 
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
-    #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model_name = "Transformer"
+    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
 
@@ -89,6 +107,17 @@ def main():
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
     
+
+
+    # Save hyperparameters
+    save_path = os.path.join(save_path, f"{model_name}_{timestamp}")
+    os.makedirs(save_path, exist_ok=True)
+
+    with open(os.path.join(save_path, "hyperparameters.txt"), "w") as f:
+        for key, value in hyperparams.items():
+            f.write(f"{key}: {value}\n")
+
+
 
     #choose optimizer
     #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -138,15 +167,28 @@ def main():
     plt.yticks(fontsize=14)
 
     plt.grid(True, linestyle='--', linewidth=0.7)  # Optional: Improve readability with a grid
+    # Save the plot in the save_path folder
+    loss_plot_path = os.path.join(save_path, "training_validation_loss.png")
+    plt.savefig(loss_plot_path, dpi=300, bbox_inches='tight')  # Save the plot as a high-resolution image
+    # Display the plot
     plt.show()
     
-    
+
+    # Save test plots
+    save_path_test = os.path.join(save_path, f"{model_name}_{timestamp}_test")
+    os.makedirs(save_path_test, exist_ok=True)
+    # Save test plots
+    save_path_test_processed = os.path.join(save_path, f"{model_name}_{timestamp}_test_postprocessed")
+    os.makedirs(save_path_test_processed, exist_ok=True)
+
+
     # Testing
     # Load best model
-    model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
+    best_model_path = os.path.join(save_path, "best_model.pth")
+    model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=False)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
 
 
 

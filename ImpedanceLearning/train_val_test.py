@@ -13,6 +13,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import logging
+from datetime import datetime
 
 
 
@@ -199,7 +200,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
     return avg_loss
 
 
-def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=1, num_samples=5, postprocessing = False):
+def test_model(model, val_loader, val_dataset, device, use_forces, save_path, num_denoising_steps=1, num_samples=5, postprocessing = False):
     """
     Function to evaluate the model by predicting noise, performing iterative denoising,
     and visualizing the results.
@@ -309,8 +310,17 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         # Increase tick label size and make ticks thicker
         ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
 
+        # Define save path for the plot
+        plot_filename = os.path.join(save_path, f"trajectory_sample_{sample_idx+1}.png")
+
+        # Save the figure
+        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+
         # Show plots without blocking execution
-        plt.show(block=False)
+        #plt.show(block=False)
+
+        # Close the figure to free memory
+        plt.close(fig)
         
     # Print Mean Absolute Differences
     print(f"\nMean Absolute Differences Across {num_samples} Samples:")
