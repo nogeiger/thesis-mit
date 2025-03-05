@@ -254,15 +254,17 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
             # Apply the offset to all points in the denoised trajectory
             #denoised_trajectory_np += offset[:, np.newaxis, :]
 
-            # Compute the offset using the average of the first 5 points difference
-            offset = np.mean(clean_trajectory_np[:, :5, :] - denoised_trajectory_np[:, :5, :], axis=1)
-            # Apply the offset to all points in the denoised trajectory
-            denoised_trajectory_np += offset[:, np.newaxis, :]
 
             # Apply smoothing using a moving average filter
             window_size = 20  # Adjust the window size based on smoothing needs
             denoised_trajectory_np = uniform_filter1d(denoised_trajectory_np, size=window_size, axis=1, mode='nearest')
 
+
+
+            # Compute the offset using the average of the first 5 points difference
+            offset = np.mean(clean_trajectory_np[:, :1, :] - denoised_trajectory_np[:, :1, :], axis=1)
+            # Apply the offset to all points in the denoised trajectory
+            denoised_trajectory_np += offset[:, np.newaxis, :]
 
 
         # Compute stiffness K = F / (x - x_0)
@@ -286,19 +288,26 @@ def test_model(model, val_loader, val_dataset, device, use_forces, num_denoising
         overall_mean_diffs.append(overall_mean_diff)
 
         # Create a separate figure for each sample
-        fig, ax_traj = plt.subplots(1, 1, figsize=(10, 6))
+        fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
 
-        # Plot clean vs denoised trajectory (Y-axis only)
-        ax_traj.plot(clean_trajectory_np[0, :, 1], label='Clean', linewidth=2.5, color='darkblue')
-        ax_traj.plot(denoised_trajectory_np[0, :, 1], linestyle='--', label='Denoised', linewidth=2.5, color='darkgreen')
+        # Plot clean vs denoised trajectory (Y-axis only) with thicker lines
+        ax_traj.plot(clean_trajectory_np[0, :, 1], label='Clean (ground truth)', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_trajectory_np[0, :, 1], linestyle='--', label='Denoised (diffusion model)', linewidth=3.5, color='darkgreen')
 
-        # Customize plot appearance
-        ax_traj.set_xlabel('Time Step', fontsize=14)
-        ax_traj.set_ylabel('Position', fontsize=14)
-        ax_traj.set_title(f'Clean vs Denoised Trajectory - Sample {sample_idx+1}', fontsize=16)
-        ax_traj.legend(fontsize=12)
-        ax_traj.grid(True, linestyle="--", alpha=0.7)
-        ax_traj.tick_params(axis='both', labelsize=12, width=2, length=6)
+   
+        # Customize plot appearance with bold labels and increased font size
+        ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
+        ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')  # Y-label with tilde notation
+        ax_traj.set_title(f'Clen vs denoised zero force trajectory in y-direction - Sample {sample_idx+1}', 
+                        fontsize=18, fontweight='bold')
+
+        ax_traj.legend(fontsize=14)
+
+        # Make grid lines more visible
+        ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
+
+        # Increase tick label size and make ticks thicker
+        ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
 
         # Show plots without blocking execution
         plt.show(block=False)

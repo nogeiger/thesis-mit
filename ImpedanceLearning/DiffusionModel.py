@@ -85,7 +85,6 @@ def main():
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
 
 
-
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
@@ -122,13 +121,23 @@ def main():
     #plot train losses
     # Ensure x-axis matches the number of recorded epochs
     epochs_trained = len(train_losses)
-    plt.figure(figsize=(10, 5))
-    plt.plot(range(1, epochs_trained + 1), train_losses, label='Training Loss')
-    plt.plot(range(1, epochs_trained + 1), val_loss, color='red', linestyle='--', label='Validation Loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
-    plt.legend()
+    plt.figure(figsize=(12, 6))
+
+    # Plot training and validation loss with thicker lines
+    plt.plot(range(1, epochs_trained + 1), train_losses, color='darkgreen',linewidth=3, label='Training Loss')
+    plt.plot(range(1, epochs_trained + 1), val_loss, color='darkblue', linestyle='--', linewidth=3, label='Validation Loss')
+
+    # Increase font sizes for better readability
+    plt.xlabel('Epochs', fontsize=16, fontweight='bold')
+    plt.ylabel('Loss (based on noise)', fontsize=16, fontweight='bold')
+    plt.title('Training and validation loss', fontsize=18, fontweight='bold')
+    plt.legend(fontsize=14)
+
+    # Increase tick label size
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+
+    plt.grid(True, linestyle='--', linewidth=0.7)  # Optional: Improve readability with a grid
     plt.show()
     
     
@@ -136,8 +145,8 @@ def main():
     # Load best model
     model.load_state_dict(torch.load("save_checkpoints/best_model.pth", weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=False)
-    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=25, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=True)
 
 
 
