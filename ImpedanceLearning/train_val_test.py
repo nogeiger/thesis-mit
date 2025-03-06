@@ -333,7 +333,30 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     print(f"\nMean Stiffness Across {num_samples} Samples: {np.mean(stiffness_values):.6f}")
 
 
+        # Define the path for the results file
+    results_file = os.path.join(save_path, "test_results.txt")
+
+    # Prepare the results text
+    results_text = (
+        f"\nMean Absolute Differences Across {num_samples} Samples:\n"
+        f"X-axis: {np.mean(mean_diffs_x):.6f}\n"
+        f"Y-axis: {np.mean(mean_diffs_y):.6f}\n"
+        f"Z-axis: {np.mean(mean_diffs_z):.6f}\n"
+        f"Overall: {np.mean(overall_mean_diffs):.6f}\n\n"
+        f"Mean Stiffness Across {num_samples} Samples: {np.mean(stiffness_values):.6f}\n"
+    )
+
+    # Print results to console
+    print(results_text)
+
+    # Save results to file
+    with open(results_file, "w") as file:
+        file.write(results_text)
+
+    print(f"Test results saved to {results_file}")
+
+
     # Keep plots open until the user closes them
-    plt.pause(0.1)
-    input("Press Enter to close all plots and continue...")
+    #plt.pause(0.1)
+    #input("Press Enter to close all plots and continue...")
     plt.close('all')
