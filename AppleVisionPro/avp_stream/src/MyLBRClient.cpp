@@ -39,7 +39,7 @@ or otherwise, without the prior written consent of KUKA Roboter GmbH.
 \file
 \version {1.9}
 */
-
+#include <ctime>
 #include <stdio.h>
 #include <iostream>
 #include <string.h>
@@ -152,8 +152,6 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Translational stiffness
     Kp = Eigen::MatrixXd::Identity( 3, 3 );                 // Translational stiffness
     Kr = Eigen::MatrixXd::Identity( 3, 3 );                 // Rotational stiffness
-    Kq = Eigen::MatrixXd::Identity( 7, 7 );                 // Nullpace stiffness (no need to change!)
-    Kq = 8 * Kq;
 
  
     // *********************************
@@ -183,6 +181,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
         printf("Error: Invalid stiffness category selected.\n\n");
     }
     
+    // Joint space stiffness
+    Kq = Eigen::MatrixXd::Identity( 7, 7 );                 // Nullpace stiffness (no need to change!)
+    Kq = 10 * Kq;
 
     // Joint space damping
     Bq = Eigen::MatrixXd::Identity( 7, 7 );
@@ -226,11 +227,25 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Store data
     // ************************************************************
 
-    // Open a single binary file
-    File_data.open("/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/File_data.bin", std::ios::binary);
+
+    // Get the current timestamp and create the filename
+    std::time_t now = std::time(nullptr);
+    std::tm* localTime = std::localtime(&now);
+    
+    char buffer[50];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", localTime); // Format: YYYY-MM-DD_HH-MM-SS
+    
+    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/RobotData_Circle_" 
+                            + std::string(buffer) + ".bin";
+    
+    // Open a uniquely named binary file
+    File_data.open(filename, std::ios::binary);
     if (!File_data) {
-        std::cerr << "Error opening file for writing!" << std::endl;
+        std::cerr << "Error opening file for writing: " << filename << std::endl;
+    } else {
+        std::cout << "File successfully opened: " << filename << std::endl;
     }
+    
 
     // ************************************************************
     // INCLUDE FT-SENSOR
@@ -239,9 +254,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     f_ext_ee = Eigen::VectorXd::Zero( 3 );
     m_ext_ee = Eigen::VectorXd::Zero( 3 );
-    f_ext_0 = Eigen::VectorXd::Zero( 3 );
-    m_ext_0 = Eigen::VectorXd::Zero( 3 );
-    F_ext_0 = Eigen::VectorXd::Zero( 6 );
+    f_ext = Eigen::VectorXd::Zero( 3 );
+    m_ext = Eigen::VectorXd::Zero( 3 );
+
 
     AtiForceTorqueSensor ftSensor("172.31.1.1");
     
@@ -466,8 +481,8 @@ void MyLBRClient::command()
     m_ext_ee[2] = fts_bt[5];
 
     // Convert to robot base coordinates
-    f_ext_0 = R * f_ext_ee;
-    m_ext_0 = R * m_ext_ee;
+    f_ext = R * f_ext_ee;
+    m_ext = R * m_ext_ee;
 
 
     // ************************************************************
@@ -495,6 +510,33 @@ void MyLBRClient::command()
     H = myLBR->getForwardKinematics( q, 7, pointPosition );
     R = H.block< 3, 3 >( 0, 0 );
     p = H.block< 3, 1 >( 0, 3 );
+
+    // Transform rotations to quaternions
+    //Eigen::Quaterniond Q(R);
+    Eigen::Matrix3d R_fixed = R.block<3,3>(0,0); // Ensure it's 3x3
+    Eigen::Quaterniond Q(R_fixed);
+    Q.normalize();
+
+    // Extract rotation angle
+    double theta = 2 * acos( Q.w() );
+    double eps = 0.01;
+    if( theta <  0.01 ){
+        theta = theta + eps ;
+    }
+        
+    // Compute norm factor, handle edge case for small theta
+    double sin_half_theta  = sin(theta  / 2);
+    double norm_fact ;
+    if (fabs(sin_half_theta ) < 1e-6) {  // Handle small-angle case
+        norm_fact  = 1.0;  // Default to 1, or handle separately
+    } else {
+        norm_fact  = 1.0 / sin_half_theta ;
+    }
+        
+    Eigen::VectorXd u = Eigen::VectorXd::Zero( 3, 1 );
+    u[0] = norm_fact  * Q.x();
+    u[1] = norm_fact  * Q.y();
+    u[2] = norm_fact  * Q.z();
 
     //  Get initial transfomation of first iteration
     if(currentTime < sampleTime)
@@ -564,33 +606,33 @@ void MyLBRClient::command()
     Eigen::Matrix3d R_ee_des =  R.transpose() * R_ini * del_R;
 
     // Transform rotations to quaternions
-    Eigen::Quaterniond Q(R_ee_des);
-    Q.normalize();
+    Eigen::Quaterniond Q_ee_des(R_ee_des);
+    Q_ee_des.normalize();
 
     // Extract rotation angle
-    double theta = 2 * acos( Q.w() );
-    double eps = 0.01;
-    if( theta <  0.01 ){
-        theta = theta + eps;
+    double theta_0 = 2 * acos( Q_ee_des.w() );
+    double eps_0 = 0.01;
+    if( theta_0 <  0.01 ){
+        theta_0 = theta_0 + eps_0;
     }
 
     // Scale desired angle
     int scaleFact = 2;
-    theta = theta / scaleFact;
+    theta_0 = theta_0 / scaleFact;
 
     // Compute norm factor, handle edge case for small theta
-    double sin_half_theta = sin(theta / 2);
-    double norm_fact;
-    if (fabs(sin_half_theta) < 1e-6) {  // Handle small-angle case
-        norm_fact = 1.0;  // Default to 1, or handle separately
+    double sin_half_theta_0 = sin(theta_0 / 2);
+    double norm_fact_0;
+    if (fabs(sin_half_theta_0) < 1e-6) {  // Handle small-angle case
+        norm_fact_0 = 1.0;  // Default to 1, or handle separately
     } else {
-        norm_fact = 1.0 / sin_half_theta;
+        norm_fact_0 = 1.0 / sin_half_theta_0;
     }
 
     Eigen::VectorXd u_ee = Eigen::VectorXd::Zero( 3, 1 );
-    u_ee[0] = norm_fact * Q.x();
-    u_ee[1] = norm_fact * Q.y();
-    u_ee[2] = norm_fact * Q.z();
+    u_ee[0] = norm_fact_0 * Q_ee_des.x();
+    u_ee[1] = norm_fact_0 * Q_ee_des.y();
+    u_ee[2] = norm_fact_0 * Q_ee_des.z();
 
     // Transform to robot base coordinates
     Eigen::VectorXd u_0 = R * u_ee;
@@ -627,7 +669,7 @@ void MyLBRClient::command()
     Eigen::MatrixXd Br = alpha_w * Kr;
 
     // Calculate moment
-    Eigen::VectorXd m = Kr * u_0 * theta - Br * omega;
+    Eigen::VectorXd m = Kr * u_0 * theta_0- Br * omega;
 
     // Convert to torques
     Eigen::VectorXd tau_rotation = J_w.transpose() * m;
@@ -639,7 +681,8 @@ void MyLBRClient::command()
 
     Eigen::MatrixXd N = Eigen::MatrixXd::Identity(7, 7) - J.transpose() * J_bar.transpose();
 
-    Eigen::VectorXd tau_q = Kq * (q_ini - q) - Bq * dq;
+    //Eigen::VectorXd tau_q = Kq * (q_ini - q) - Bq * dq;
+    Eigen::VectorXd tau_q = Bq * dq;
 
     // ************************************************************
     // Control torque
@@ -657,10 +700,16 @@ void MyLBRClient::command()
 
     // Buffer binary data
     buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
-    buffer.write(reinterpret_cast<const char*>(f_ext_0.data()), sizeof(double) * f_ext_0.size());
-    buffer.write(reinterpret_cast<const char*>(m_ext_0.data()), sizeof(double) * m_ext_0.size());
+    buffer.write(reinterpret_cast<const char*>(f_ext.data()), sizeof(double) * f_ext.size());
+    buffer.write(reinterpret_cast<const char*>(m_ext.data()), sizeof(double) * m_ext.size());
     buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
     buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+    buffer.write(reinterpret_cast<const char*>(u.data()), sizeof(double) * u.size());
+    buffer.write(reinterpret_cast<const char*>(&theta), sizeof(double));  
+    buffer.write(reinterpret_cast<const char*>(u_0.data()), sizeof(double) * u.size());
+    buffer.write(reinterpret_cast<const char*>(&theta_0), sizeof(double)); 
+
+
 
     // Periodic flush to file (e.g., every 1000 iterations)
     if (buffer.str().size() > 4096) { // Write every 4KB of data
@@ -866,14 +915,3 @@ Eigen::MatrixXd MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::Mat
     return Lam;
 
 }
-
-
-
-
-
-
-
-
-
-
-
