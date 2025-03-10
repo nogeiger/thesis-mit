@@ -4,6 +4,9 @@ project(avp_stream)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Debug)
+
+
 # Find Boost libraries
 find_package(Boost REQUIRED COMPONENTS filesystem system thread date_time chrono)
 

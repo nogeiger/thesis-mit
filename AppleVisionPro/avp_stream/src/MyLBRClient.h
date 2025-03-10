@@ -116,7 +116,19 @@ private:
     void runStreamerThread();
     void startPythonScript();
 
-    double* matrix;
+    double* matrix_rw;
+
+    Eigen::MatrixXd H_avp_rw_ini;
+    Eigen::MatrixXd R_avp_rw_ini;
+    Eigen::VectorXd p_avp_rw_ini;
+
+    Eigen::MatrixXd p_avp_rw;
+    Eigen::MatrixXd p_avp_rw_prev;
+    Eigen::MatrixXd p_avp_rw_prev_prev;
+
+    Eigen::MatrixXd R_avp_rw;
+    Eigen::MatrixXd R_avp_rw_prev;
+    Eigen::MatrixXd R_avp_rw_prev_prev;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
@@ -142,6 +154,7 @@ private:
 
     // Current position and velocity as Eigen vector
     Eigen::VectorXd q;
+    Eigen::VectorXd q_ini;
     Eigen::VectorXd dq;
 
     // Command torque vectors (with and without constraints)
@@ -156,25 +169,24 @@ private:
     Eigen::MatrixXd H;
     Eigen::MatrixXd R;
     Eigen::Matrix3d R_z;
+    Eigen::Matrix3d R_avp_0;
     Eigen::MatrixXd J;
     
-    Eigen::MatrixXd H_rw_ini;
-    Eigen::MatrixXd R_rw_ini;
-    Eigen::MatrixXd p_rw_ini;
     Eigen::MatrixXd H_ini;
     Eigen::MatrixXd R_ini;
     Eigen::VectorXd p_ini;
     Eigen::VectorXd p;
     Eigen::VectorXd p_0_ini;
-    Eigen::VectorXd p_vp_3d;
     
     Eigen::MatrixXd Kp;
     Eigen::MatrixXd Kr;
+    Eigen::MatrixXd Kq;
+    Eigen::MatrixXd Bq;
 
     // Damping will be calculated at runtime
     // Comment out for constant damping!
-    // Eigen::MatrixXd Bp;
-    // Eigen::MatrixXd Br;
+    //     Eigen::MatrixXd Bp;
+    //     Eigen::MatrixXd Br;
     
 
     // Force-Torque Sensor
@@ -183,9 +195,9 @@ private:
     double* fts_first;
     Eigen::VectorXd f_ext_ee;
     Eigen::VectorXd m_ext_ee;
-    Eigen::VectorXd f_ext_0;
-    Eigen::VectorXd m_ext_0;
-    Eigen::VectorXd F_ext_0;
+    Eigen::VectorXd f_ext;
+    Eigen::VectorXd m_ext;
+   
 
     void forceSensorThread();
 
@@ -201,7 +213,7 @@ private:
 
     // Damping design
     double compute_alpha(Eigen::Matrix3d& Lambda, Eigen::Vector3d& k_t, double damping_factor);
-    Eigen::Matrix3d getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J_3D, double k);
+    Eigen::MatrixXd getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::MatrixXd J, double k);
 
 
     // Files to store data
