@@ -5,7 +5,7 @@ import os
 import glob
 
 # Directory containing .bin files
-binary_folder = "Data/"  # Update if needed
+binary_folder = "Data/"  
 
 # Define the correct number of categories (columns)
 column_count = 21  # We confirmed earlier
