@@ -1,9 +1,12 @@
 import time
 import numpy as np
+import signal
+import sys
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.29.133.237"  # Replace with your actual IP
+avp_ip = "10.29.213.104"
+
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 

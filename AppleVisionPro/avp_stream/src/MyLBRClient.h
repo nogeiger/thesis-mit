@@ -195,9 +195,9 @@ private:
     double* fts_first;
     Eigen::VectorXd f_ext_ee;
     Eigen::VectorXd m_ext_ee;
-    Eigen::VectorXd f_ext_0;
-    Eigen::VectorXd m_ext_0;
-    Eigen::VectorXd F_ext_0;
+    Eigen::VectorXd f_ext;
+    Eigen::VectorXd m_ext;
+   
 
     void forceSensorThread();
 
