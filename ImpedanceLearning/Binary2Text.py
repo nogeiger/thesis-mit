@@ -8,14 +8,19 @@ import glob
 binary_folder = "Data/"  # Update if needed
 
 # Define the correct number of categories (columns)
-column_count = 13  # We confirmed earlier
+column_count = 21  # We confirmed earlier
 
 # Define the column names based on C++ variables
 column_names = [
-    "time", "f_x", "f_y", "f_z", 
+    "time", 
+    "f_x", "f_y", "f_z", 
     "m_x", "m_y", "m_z", 
     "x", "y", "z", 
-    "x0", "y0", "z0"
+    "x0", "y0", "z0",
+    "u_x", "u_y", "u_z",
+    "theta",
+    "u0_x", "u0_y", "u0_z",
+    "theta0",
 ]
 
 # Find all .bin files in the directory
