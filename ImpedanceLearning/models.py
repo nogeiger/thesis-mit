@@ -19,10 +19,10 @@ class NoisePredictorInitial(nn.Module):
     def __init__(self, seq_length, hidden_dim, use_forces=False):
         super(NoisePredictorInitial, self).__init__()
         self.use_forces = use_forces
-        input_dim = seq_length * 3  # Clean and noisy trajectories (pos_0 and pos)
+        input_dim = seq_length * 7  # Clean and noisy trajectories (pos,u,theta)
         
         if self.use_forces:
-            input_dim += seq_length * 3  # Add forces (force_x, force_y, force_z)
+            input_dim += seq_length * 6  # Add forces (force_x, force_y, force_z,m_x,m_y,m_z)
 
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
@@ -32,29 +32,32 @@ class NoisePredictorInitial(nn.Module):
         self.hidden_layer_5 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_6 = nn.Linear(hidden_dim, hidden_dim)
         self.hidden_layer_7 = nn.Linear(hidden_dim, hidden_dim)
-        self.output_layer = nn.Linear(hidden_dim, seq_length * 3)  # Output clean trajectory (pos_0)
+        self.output_layer = nn.Linear(hidden_dim, seq_length * 5)  # Output clean trajectory (pos_0, alpha angle for cosine similarity and delta angle)
         self.relu = nn.ReLU()
 
-    def forward(self, noisy_trajectory, forces=None):
+    def forward(self, noisy_pos, noisy_u, noisy_theta, forces=None, moment=None):
         """
         Forward pass to predict clean 3D trajectory.
 
         Args:
-            noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
+            noisy_pos (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
+            noisy_u (torch.Tensor): Input noisy forces of shape [batch_size, seq_length, 3].
+            noisy_theta (torch.Tensor): Input noisy angles of shape [batch_size, seq_length, 1].
             forces (torch.Tensor, optional): Input forces of shape [batch_size, seq_length, 3].
 
         Returns:
-            torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
+            torch.Tensor, torch.Tensor, torch.Tensor: Predicted noise for pos,u,thea of shape [batch_size, seq_length, 3].
+
         """
-        batch_size, seq_length, _ = noisy_trajectory.shape
+        batch_size, seq_length, _ = noisy_pos.shape
 
         # If using forces, concatenate them with noisy trajectory
         if self.use_forces:
-            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Concatenate noisy trajectory and forces
+            x = torch.cat((noisy_pos,noisy_u,noisy_theta, forces, moment), dim=-1)  # Concatenate noisy trajectory and forces
         else:
-            x = noisy_trajectory
+            x = torch.cat((noisy_pos, noisy_u, noisy_theta), dim=-1)  # Concatenate noisy trajectory
 
-        x = x.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 6] if forces are included
+        x = x.view(batch_size, -1)  # Flatten to [batch_size, seq_length * 13] if forces are included
         x = self.input_layer(x)
         x = self.relu(x)
         x = self.hidden_layer_1(x)
@@ -66,12 +69,12 @@ class NoisePredictorInitial(nn.Module):
         x = self.hidden_layer_4(x)
         x = self.relu(x)
         predicted_noise = self.output_layer(x)
-        return predicted_noise.view(batch_size, seq_length, 3)  # Reshape back to [batch_size, seq_length, 3]
+        return predicted_noise.view(batch_size, seq_length, 5)  # Reshape back to [batch_size, seq_length, 3]
 
 
 #Transformer
 class NoisePredictorTransformer(nn.Module):
-    def __init__(self, seq_length, hidden_dim, num_heads=4, num_layers=2, use_forces=False):
+    def __init__(self, seq_length, hidden_dim, num_heads=8, num_layers=4, use_forces=False):
         super(NoisePredictorTransformer, self).__init__()
         self.use_forces = use_forces
         input_dim = 3  # (x, y, z)

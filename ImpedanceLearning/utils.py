@@ -27,9 +27,9 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     total_loss = mse_loss + weight_start_point * start_point_loss
     return total_loss
 
-def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
-              beta_start, beta_end, noise_with_force=False, add_gaussian_noise=False):
-
+def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, force, moment,
+              max_noiseadding_steps, beta_start, beta_end, noise_with_force=False, add_gaussian_noise=False):
+    
     """
     Dynamically adds noise to a clean 3D trajectory based on the actual noise between the clean and noisy trajectories,
     following a diffusion model schedule.
@@ -37,6 +37,12 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     Args:
         clean_trajectory (torch.Tensor): The clean trajectory with shape [seq_length, 3].
         noisy_trajectory (torch.Tensor): The noisy trajectory with shape [seq_length, 3].
+        clean_u (torch.Tensor): The clean input force with shape [seq_length, 3].
+        noisy_u (torch.Tensor): The noisy input force with shape [seq_length, 3].
+        clean_theta (torch.Tensor): The clean input angle with shape [seq_length, 1].
+        noisy_theta (torch.Tensor): The noisy input angle with shape [seq_length, 1].
+        force (torch.Tensor): The force with shape [seq_length, 3].
+        moment (torch.Tensor): The moment with shape [seq_length, 3].
         max_noiseadding_steps (int): Maximum number of steps to iteratively add noise.
         beta_start (float): Initial value of noise scale.
         beta_end (float): Final value of noise scale.
@@ -46,32 +52,58 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     """
     # Calculate the actual noise (difference between clean and noisy) - if scale_noise_with_force is True, use force as the noise
     if noise_with_force:
-        actual_noise = force
+        actual_noise_pos = force
     # otherwise use difference between clean and noisy trajectory
     else:
-        actual_noise = noisy_trajectory - clean_trajectory
+        actual_noise_pos = noisy_pos - clean_pos
+
+    actual_noise_theta = noisy_theta - clean_theta
+
+    #use coisne similiarity to calc alpha which is seen as the noise here for u (displacement vector)
+    # Compute cosine similarity directly (dot product since length is 1)
+    cos_alpha = torch.sum(noisy_u * clean_u, dim=-1)  # Shape: [64, 32]
+    # Ensure values are clipped to [-1, 1] to avoid numerical errors in arccos
+    cos_alpha = torch.clamp(cos_alpha, -1.0, 1.0)
+    # Compute angle alpha in radians
+    actual_noise_u_alpha = torch.acos(cos_alpha)  # Shape: [64, 32]
+
 
     # Optionally add Gaussian noise to the actual noise
     if add_gaussian_noise:
         # Generate Gaussian noise
-        gaussian_noise = torch.randn_like(actual_noise)
+        gaussian_noise_pos = torch.randn_like(actual_noise_pos)
+        gaussian_noise_u_alpha = torch.randn_like(actual_noise_u_alpha)
+        gaussian_noise_theta = torch.randn_like(actual_noise_theta)
         
         # Normalize the Gaussian noise to have unit norm
-        norm = torch.norm(gaussian_noise)
-        if norm > 0:  # Avoid division by zero
-            gaussian_noise = gaussian_noise / norm
+        norm_pos = torch.norm(gaussian_noise_pos)
+        norm_u_alpha = torch.norm(gaussian_noise_u_alpha)
+        norm_theta = torch.norm(gaussian_noise_theta)
+
+        if norm_pos > 0:  # Avoid division by zero
+            gaussian_noise_pos = gaussian_noise_pos / norm_pos
+        if norm_u_alpha > 0:  # Avoid division by zero
+            gaussian_noise_u_alpha = gaussian_noise_u_alpha / norm_u_alpha
+        if norm_theta > 0:  # Avoid division by zero
+            gaussian_noise_theta = gaussian_noise_theta / norm_theta
         
         #scale the normalized noise (to match force/trajectorz noise scale / to not have noise from gaussian which is way higher then the actual noise)
-        gaussian_noise = gaussian_noise * torch.norm(actual_noise)  # Scale to match actual_noise norm
+        gaussian_noise_pos = gaussian_noise_pos * torch.norm(actual_noise_pos)  # Scale to match actual_noise norm
+        gaussian_noise_u_alpha = gaussian_noise_u_alpha * torch.norm(actual_noise_u_alpha)  # Scale to match actual_noise norm
+        gaussian_noise_theta = gaussian_noise_theta * torch.norm(actual_noise_theta)  # Scale to match actual_noise norm
         
         # Add the normalized Gaussian noise to the actual noise
-        actual_noise += gaussian_noise
+        actual_noise_pos += gaussian_noise_pos
+        actual_noise_u_alpha += gaussian_noise_u_alpha
+        actual_noise_theta += gaussian_noise_theta
 
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
     noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()
 
     # Initialize the noisy trajectory as the clean trajectory
-    noisy_trajectory_output = clean_trajectory.clone()
+    noisy_pos_output = clean_pos.clone()
+    noisy_u_output = clean_u.clone()
+    noisy_theta_output = clean_theta.clone()
 
     # Linear schedule for noise scale (beta values)
     beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced beta values
@@ -82,11 +114,34 @@ def add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps,
     t = torch.randint(0, noiseadding_steps, (1,)).item()  # Select a random diffusion step
 
     # Compute the noisy trajectory at timestep t
-    noisy_trajectory_output = torch.sqrt(alpha_bar[t]) * clean_trajectory + torch.sqrt(1 - alpha_bar[t]) * actual_noise
-    #print(torch.sqrt(1 - alpha_bar[t]))
-    noise_scale = 1 / torch.sqrt(alpha_bar[t])
+    noisy_pos_output = torch.sqrt(alpha_bar[t]) * clean_pos + torch.sqrt(1 - alpha_bar[t]) * actual_noise_pos
+    noisy_theta_output = torch.sqrt(alpha_bar[t]) * clean_theta + torch.sqrt(1 - alpha_bar[t]) * actual_noise_theta
+
+    # Compute noisy rotation angle at timestep t
+    noisy_alpha = torch.sqrt(alpha_bar[t]) * actual_noise_u_alpha  # Shape: [64, 32]
+
+    # Compute the delta noise (ground truth for training)
+    delta_alpha = actual_noise_u_alpha - noisy_alpha 
+
+    # Reconstruct Noisy U Using SLERP (Spherical Linear Interpolation)
+    w = torch.sqrt(1 - alpha_bar[t])
+    sin_noisy_alpha = torch.sin(noisy_alpha)  # Use noisy_alpha
+    sin_noisy_alpha = torch.where(sin_noisy_alpha > 1e-8, sin_noisy_alpha, torch.ones_like(sin_noisy_alpha) * 1e-8)
     
-    return noisy_trajectory_output, noise_scale
+    coeff_clean = torch.sin((1 - w) * noisy_alpha) / sin_noisy_alpha  # Use noisy_alpha
+    coeff_noisy = torch.sin(w * noisy_alpha) / sin_noisy_alpha  # Use noisy_alpha
+
+    # Expand to match shape [64, 32, 1]
+    coeff_clean = coeff_clean.unsqueeze(-1)
+    coeff_noisy = coeff_noisy.unsqueeze(-1)
+
+    # Compute final noisy u output
+    noisy_u_output = coeff_clean * clean_u + coeff_noisy * noisy_u
+
+    # Noise scale
+    noise_scale = 1 / torch.sqrt(alpha_bar[t])
+
+    return noisy_pos_output, noisy_u_output, delta_alpha, noisy_theta_output, noise_scale
 
 
 def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):

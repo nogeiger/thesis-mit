@@ -56,34 +56,46 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         total_loss = 0
         
         # Use tqdm to create a progress bar
-        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
-
+        for batch_idx, (pos_0, pos, u_0, u, theta_0, theta, force, moment) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
+            
             # Move data to device
-            clean_trajectory = pos_0.to(device)
-            complete_noisy_trajectory = pos.to(device)
+            clean_pos = pos_0.to(device)
+            complete_noisy_pos = pos.to(device)
+            clean_u = u_0.to(device)
+            complete_noisy_u = u.to(device)
+            clean_theta = theta_0.to(device)
+            complete_noisy_theta = theta.to(device)
             force = force.to(device)
+            moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_trajectory, noise_scale = add_noise(clean_trajectory, complete_noisy_trajectory, force, noiseadding_steps, beta_start, 
-                                         beta_end, noise_with_force, add_gaussian_noise)
+            noisy_pos, noisy_u, delta_alpha, noisy_theta, noise_scale = add_noise(clean_pos, complete_noisy_pos, 
+                                        clean_u, complete_noisy_u, clean_theta, complete_noisy_theta,
+                                        force, moment,
+                                        noiseadding_steps, beta_start, 
+                                        beta_end, noise_with_force, add_gaussian_noise)
             
             # Compute the max noise (actual noise) based on the flag
             if noise_with_force:
-                actual_noise = force  # Use force as the max noise
+                actual_noise_pos = force  # Use force as the max noise
                 use_forces = False #then force should not be used as input
             else:
-                actual_noise = noisy_trajectory - clean_trajectory  # Default noise
+                actual_noise_pos = noisy_pos - clean_pos  # Default noise
+
+            actual_noise_u = noisy_u - clean_u
+            actual_noise_theta = noisy_theta - clean_theta
 
             optimizer.zero_grad()
 
-            # Predict the noise from the noisy trajectory
+            # Predict the noise from the noisy pos
             if use_forces:
-                predicted_noise = model(noisy_trajectory, force)
+                predicted_noise = model(noisy_pos, noisy_u, noisy_theta, force, moment)
+            
             else:
-                predicted_noise = model(noisy_trajectory)
-
+                predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
+            
             # Calculate loss and perform backward pass
-            loss = criterion(predicted_noise, actual_noise)
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], delta_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
@@ -167,31 +179,39 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
     # Use tqdm to create a progress bar
     with torch.no_grad():
-        for batch_idx, (pos_0, pos, force) in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
-            clean_trajectory = pos_0.to(device)
-            noisy_trajectory = pos.to(device)
+        for batch_idx, (pos_0, pos, u_0, u, theta_0, theta, force, moment)in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
+            clean_pos = pos_0.to(device)
+            noisy_pos = pos.to(device)
+            clean_u = u_0.to(device)
+            noisy_u = u.to(device)
+            clean_theta = theta_0.to(device)
+            noisy_theta = theta.to(device)
             force = force.to(device)
+            moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_trajectory, noise_scale = add_noise(clean_trajectory, noisy_trajectory, force, max_noiseadding_steps, 
-                                         beta_start, beta_end, noise_with_force, add_gaussian_noise)
+            noisy_pos, noisy_u, delta_alpha, noisy_theta, noise_scale = add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta,
+                                        force, moment,
+                                        max_noiseadding_steps, beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
             # Compute the max noise (actual noise) based on the flag
             if noise_with_force:
-                actual_noise = force  # Use force as the max noise
+                actual_noise_pos = force  # Use force as the max noise
                 use_forces = False #then force should not be used as input
             else:
-                actual_noise = noisy_trajectory - clean_trajectory  # Default: noise is the diff
+                actual_noise_pos = noisy_pos - clean_pos  # Default: noise is the diff
 
+            actual_noise_u = noisy_u - clean_u
+            actual_noise_theta = noisy_theta - clean_theta
 
-            # Predict the noise from the noisy trajectory
+            # Predict the noise from the noisy pos
             if use_forces:
-                predicted_noise = model(noisy_trajectory, force)
+                predicted_noise = model(noisy_pos, noisy_u, noisy_theta, force, moment)
             else:
-                predicted_noise = model(noisy_trajectory)
+                predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
 
             # Calculate loss
-            loss = criterion(predicted_noise, actual_noise)
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], delta_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -224,82 +244,121 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     sample_indices = random.sample(range(len(val_data)), num_samples)
 
     # Initialize lists for mean absolute differences
-    mean_diffs_x, mean_diffs_y, mean_diffs_z, overall_mean_diffs = [], [], [], []
-    stiffness_values = []
+    mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
+    mean_diffs_u_x, mean_diffs_u_y, mean_diffs_u_z, overall_mean_diffs_u = [], [], [], []
+    mean_diffs_theta = []
+
 
     for sample_idx, idx in enumerate(sample_indices):
         # Fetch a **random sample** instead of always using the first batch
-        clean_trajectory, noisy_trajectory, force = val_data[idx]
+        clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, force, moment = val_data[idx]
 
         # Move data to the correct device
-        clean_trajectory = clean_trajectory.unsqueeze(0).to(device)  # Add batch dimension
-        noisy_trajectory = noisy_trajectory.unsqueeze(0).to(device)
+        clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
+        noisy_pos = noisy_pos.unsqueeze(0).to(device)
+        clean_u = clean_u.unsqueeze(0).to(device)
+        noisy_u = noisy_u.unsqueeze(0).to(device)
+        clean_theta = clean_theta.unsqueeze(0).to(device)
+        noisy_theta = noisy_theta.unsqueeze(0).to(device)
         force = force.unsqueeze(0).to(device)
-
+        moment = moment.unsqueeze(0).to(device)
         # Start iterative denoising
-        denoised_trajectory = noisy_trajectory.clone()
+        denoised_pos = noisy_pos.clone()
+        denoised_u = noisy_u.clone()
+        denoised_theta = noisy_theta.clone()
         for _ in range(num_denoising_steps):
-            predicted_noise = model(denoised_trajectory, force) if use_forces else model(denoised_trajectory)
-            denoised_trajectory = denoised_trajectory - predicted_noise  # Remove noise iteratively
+            predicted_noise = model(denoised_pos, denoised_u, denoised_theta, force, moment) if use_forces else model(denoised_pos, denoised_u, denoised_theta)
+            denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
+            denoised_u = denoised_u - predicted_noise[:,:,3:6]
+            denoised_theta = denoised_theta - predicted_noise[:,:,-1].unsqueeze(-1)
+
 
         # Denormalize trajectories
-        noisy_trajectory_np = val_dataset.denormalize(noisy_trajectory.detach().cpu(), "pos").numpy()
-        clean_trajectory_np = val_dataset.denormalize(clean_trajectory.detach().cpu(), "pos_0").numpy()
-        denoised_trajectory_np = val_dataset.denormalize(denoised_trajectory.detach().cpu(), "pos_0").numpy()
+        noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
+        clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
+        denoised_pos_np = val_dataset.denormalize(denoised_pos.detach().cpu(), "pos_0").numpy()
+
+        noisy_u_np = val_dataset.denormalize(noisy_u.detach().cpu(), "u").numpy()
+        clean_u_np = val_dataset.denormalize(clean_u.detach().cpu(), "u_0").numpy()
+        denoised_u_np = val_dataset.denormalize(denoised_u.detach().cpu(), "u_0").numpy()
+
+        noisy_theta_np = val_dataset.denormalize(noisy_theta.detach().cpu(), "theta").numpy()
+        clean_theta_np = val_dataset.denormalize(clean_theta.detach().cpu(), "theta_0").numpy()
+        denoised_theta_np = val_dataset.denormalize(denoised_theta.detach().cpu(), "theta_0").numpy()
+
         force_np = val_dataset.denormalize(force.detach().cpu(), "force").numpy()
+        moment_np = val_dataset.denormalize(moment.detach().cpu(), "force").numpy()
 
         if postprocessing == True:
             #Preprocessing of denoise
             # Compute the offset using the first point difference
-            #offset = clean_trajectory_np[:, 0, :] - denoised_trajectory_np[:, 0, :]
-            # Apply the offset to all points in the denoised trajectory
-            #denoised_trajectory_np += offset[:, np.newaxis, :]
+            #offset = clean_pos_np[:, 0, :] - denoised_pos_np[:, 0, :]
+            # Apply the offset to all points in the denoised pos
+            #denoised_pos_np += offset[:, np.newaxis, :]
 
 
             # Apply smoothing using a moving average filter
             window_size = 20  # Adjust the window size based on smoothing needs
-            denoised_trajectory_np = uniform_filter1d(denoised_trajectory_np, size=window_size, axis=1, mode='nearest')
+            denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
+            denoised_u_np = uniform_filter1d(denoised_u_np, size=window_size, axis=1, mode='nearest')
+            denoised_theta_np = uniform_filter1d(denoised_theta_np, size=window_size, axis=1, mode='nearest')
 
 
 
             # Compute the offset using the average of the first 5 points difference
-            offset = np.mean(clean_trajectory_np[:, :1, :] - denoised_trajectory_np[:, :1, :], axis=1)
-            # Apply the offset to all points in the denoised trajectory
-            denoised_trajectory_np += offset[:, np.newaxis, :]
-
-
-        # Compute stiffness K = F / (x - x_0)
-        displacement = noisy_trajectory_np - clean_trajectory_np  # (x - x_0)
-        stiffness = np.divide(force_np, displacement, out=np.zeros_like(force_np), where=displacement != 0)
-
-        # Compute mean stiffness for the sample
-        mean_stiffness = np.mean(stiffness)
-        stiffness_values.append(mean_stiffness)
+            offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
+            offset_u = np.mean(clean_u_np[:, :1, :] - denoised_u_np[:, :1, :], axis=1)
+            offset_theta = np.mean(clean_theta_np[:, :1, :] - denoised_theta_np[:, :1, :], axis=1)
+            # Apply the offset to all points in the denoised pos
+            denoised_pos_np += offset_pos[:, np.newaxis, :]
+            denoised_u_np += offset_u[:, np.newaxis, :]
+            denoised_theta_np += offset_theta[:, np.newaxis, :]
 
 
         # Compute mean absolute differences
-        mean_diff_x = np.mean(np.abs(clean_trajectory_np[:, :, 0] - denoised_trajectory_np[:, :, 0]))
-        mean_diff_y = np.mean(np.abs(clean_trajectory_np[:, :, 1] - denoised_trajectory_np[:, :, 1]))
-        mean_diff_z = np.mean(np.abs(clean_trajectory_np[:, :, 2] - denoised_trajectory_np[:, :, 2]))
-        overall_mean_diff = np.mean(np.abs(clean_trajectory_np - denoised_trajectory_np))
+        mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
+        mean_diff_y = np.mean(np.abs(clean_pos_np[:, :, 1] - denoised_pos_np[:, :, 1]))
+        mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
+        overall_mean_diff_pos = np.mean(np.abs(clean_pos_np - denoised_pos_np))
 
-        mean_diffs_x.append(mean_diff_x)
-        mean_diffs_y.append(mean_diff_y)
-        mean_diffs_z.append(mean_diff_z)
-        overall_mean_diffs.append(overall_mean_diff)
+        mean_diff_ux = np.mean(np.abs(clean_u_np[:, :, 0] - denoised_u_np[:, :, 0]))
+        mean_diff_uy = np.mean(np.abs(clean_u_np[:, :, 1] - denoised_u_np[:, :, 1]))
+        mean_diff_uz = np.mean(np.abs(clean_u_np[:, :, 2] - denoised_u_np[:, :, 2]))
+        overall_mean_diff_u = np.mean(np.abs(clean_u_np - denoised_u_np))
+
+        mean_diff_theta = np.mean(np.abs(clean_theta_np - denoised_theta_np))
+
+
+        # Append mean differences to lists
+        mean_diffs_pos_x.append(mean_diff_x)
+        mean_diffs_pos_y.append(mean_diff_y)
+        mean_diffs_pos_z.append(mean_diff_z)
+        overall_mean_diffs_pos.append(overall_mean_diff_pos)
+
+        mean_diffs_u_x.append(mean_diff_ux)
+        mean_diffs_u_y.append(mean_diff_uy)
+        mean_diffs_u_z.append(mean_diff_uz)
+        overall_mean_diffs_u.append(overall_mean_diff_u)
+
+        mean_diffs_theta.append(mean_diff_theta)
+
 
         # Create a separate figure for each sample
         fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
 
-        # Plot clean vs denoised trajectory (Y-axis only) with thicker lines
-        ax_traj.plot(clean_trajectory_np[0, :, 1], label='Clean (ground truth)', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_trajectory_np[0, :, 1], linestyle='--', label='Denoised (diffusion model)', linewidth=3.5, color='darkgreen')
+        # Plot clean vs denoised pos (Y-axis only) with thicker lines
+        ax_traj.plot(clean_u_np[0, :, 0], label='Clean (ground truth) x', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) x', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_u_np[0, :, 1], label='Clean (ground truth) y', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) y', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_u_np[0, :, 2], label='Clean (ground truth) z', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) z', linewidth=3.5, color='darkgreen')
 
    
         # Customize plot appearance with bold labels and increased font size
         ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
         ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')  # Y-label with tilde notation
-        ax_traj.set_title(f'Clen vs denoised zero force trajectory in y-direction - Sample {sample_idx+1}', 
+        ax_traj.set_title(f'Clean vs denoised zero force pos in y-direction - Sample {sample_idx+1}', 
                         fontsize=18, fontweight='bold')
 
         ax_traj.legend(fontsize=14)
@@ -311,7 +370,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
 
         # Define save path for the plot
-        plot_filename = os.path.join(save_path, f"trajectory_sample_{sample_idx+1}.png")
+        plot_filename = os.path.join(save_path, f"pos_sample_{sample_idx+1}.png")
 
         # Save the figure
         plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
@@ -321,29 +380,23 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
         # Close the figure to free memory
         plt.close(fig)
-        
-    # Print Mean Absolute Differences
-    print(f"\nMean Absolute Differences Across {num_samples} Samples:")
-    print(f"X-axis: {np.mean(mean_diffs_x):.6f}")
-    print(f"Y-axis: {np.mean(mean_diffs_y):.6f}")
-    print(f"Z-axis: {np.mean(mean_diffs_z):.6f}")
-    print(f"Overall: {np.mean(overall_mean_diffs):.6f}")
-
-    # Print Mean Stiffness Values
-    print(f"\nMean Stiffness Across {num_samples} Samples: {np.mean(stiffness_values):.6f}")
 
 
-        # Define the path for the results file
+    # Define the path for the results file
     results_file = os.path.join(save_path, "test_results.txt")
 
     # Prepare the results text
     results_text = (
         f"\nMean Absolute Differences Across {num_samples} Samples:\n"
-        f"X-axis: {np.mean(mean_diffs_x):.6f}\n"
-        f"Y-axis: {np.mean(mean_diffs_y):.6f}\n"
-        f"Z-axis: {np.mean(mean_diffs_z):.6f}\n"
-        f"Overall: {np.mean(overall_mean_diffs):.6f}\n\n"
-        f"Mean Stiffness Across {num_samples} Samples: {np.mean(stiffness_values):.6f}\n"
+        f"X-axis: {np.mean(mean_diffs_pos_x):.6f}\n"
+        f"Y-axis: {np.mean(mean_diffs_pos_y):.6f}\n"
+        f"Z-axis: {np.mean(mean_diffs_pos_z):.6f}\n"
+        f"Overall: {np.mean(overall_mean_diffs_pos):.6f}\n\n"
+        f"U_x: {np.mean(mean_diffs_u_x):.6f}\n"
+        f"U_y: {np.mean(mean_diffs_u_y):.6f}\n"
+        f"U_z: {np.mean(mean_diffs_u_z):.6f}\n"
+        f"Overall: {np.mean(overall_mean_diffs_u):.6f}\n\n"
+        f"Theta: {np.mean(mean_diffs_theta):.6f}\n"
     )
 
     # Print results to console
@@ -360,3 +413,106 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     #plt.pause(0.1)
     #input("Press Enter to close all plots and continue...")
     plt.close('all')
+
+
+def inference_application(model, application_loader, application_dataset, device, use_forces, save_path, num_sequences=100, num_denoising_steps=1, postprocessing=False):
+    """
+    Function to perform inference on the application dataset, reconstructing sequences sequentially.
+
+    Args:
+        model (torch.nn.Module): Trained noise predictor model.
+        application_loader (DataLoader): DataLoader for the application dataset.
+        application_dataset (Dataset): Application dataset (for denormalization).
+        device (torch.device): Device (CPU/GPU).
+        use_forces (bool): Whether forces are used as an input to the model.
+        num_sequences (int): Number of sequences to process.
+        num_denoising_steps (int): Number of denoising steps.
+        postprocessing (bool): Whether to apply postprocessing smoothing.
+    """
+    
+    model.eval()  # Set model to evaluation mode
+
+    # Convert application dataset into a list for sequential access
+    application_data = list(application_loader.dataset)
+    
+    # Ensure num_sequences does not exceed available data
+    num_sequences = min(num_sequences, len(application_data))
+    
+    # Initialize lists for mean absolute differences
+    mean_diffs_x, mean_diffs_y, mean_diffs_z, overall_mean_diffs = [], [], [], []
+
+    for seq_idx in range(num_sequences):
+        # Fetch the sequence in order
+        clean_pos, noisy_pos, force = application_data[seq_idx]
+
+        # Move data to the correct device
+        clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
+        noisy_pos = noisy_pos.unsqueeze(0).to(device)
+        force = force.unsqueeze(0).to(device)
+
+        # Start iterative denoising
+        denoised_pos = noisy_pos.clone()
+        for _ in range(num_denoising_steps):
+            predicted_noise = model(denoised_pos, force) if use_forces else model(denoised_pos)
+            denoised_pos = denoised_pos - predicted_noise  # Remove noise iteratively
+
+        # Denormalize trajectories
+        noisy_pos_np = application_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
+        clean_pos_np = application_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
+        denoised_pos_np = application_dataset.denormalize(denoised_pos.detach().cpu(), "pos_0").numpy()
+        
+        if postprocessing:
+            # Apply smoothing using a moving average filter
+            window_size = 20
+            denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
+            
+            # Compute the offset using the average of the first 5 points difference
+            offset = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
+            denoised_pos_np += offset[:, np.newaxis, :]
+
+        # Compute mean absolute differences
+        mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
+        mean_diff_y = np.mean(np.abs(clean_pos_np[:, :, 1] - denoised_pos_np[:, :, 1]))
+        mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
+        overall_mean_diff = np.mean(np.abs(clean_pos_np - denoised_pos_np))
+
+        mean_diffs_x.append(mean_diff_x)
+        mean_diffs_y.append(mean_diff_y)
+        mean_diffs_z.append(mean_diff_z)
+        overall_mean_diffs.append(overall_mean_diff)
+
+        # Save plot for each sequence
+        fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))
+        ax_traj.plot(clean_pos_np[0, :, 1], label='Clean (ground truth)', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 1], linestyle='--', label='Denoised (diffusion model)', linewidth=3.5, color='darkgreen')
+        
+        ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
+        ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')
+        ax_traj.set_title(f'Clean vs Denoised pos in Y-direction - Seq {seq_idx+1}', fontsize=18, fontweight='bold')
+        ax_traj.legend(fontsize=14)
+        ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
+        ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
+        
+        plot_filename = os.path.join(save_path, f"application_pos_seq_{seq_idx+1}.png")
+        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    # Print Mean Absolute Differences
+    print(f"\nMean Absolute Differences Across {num_sequences} Sequences:")
+    print(f"X-axis: {np.mean(mean_diffs_x):.6f}")
+    print(f"Y-axis: {np.mean(mean_diffs_y):.6f}")
+    print(f"Z-axis: {np.mean(mean_diffs_z):.6f}")
+    print(f"Overall: {np.mean(overall_mean_diffs):.6f}")
+
+    # Save results to file
+    results_file = os.path.join(save_path, "application_results.txt")
+    results_text = (
+        f"\nMean Absolute Differences Across {num_sequences} Sequences:\n"
+        f"X-axis: {np.mean(mean_diffs_x):.6f}\n"
+        f"Y-axis: {np.mean(mean_diffs_y):.6f}\n"
+        f"Z-axis: {np.mean(mean_diffs_z):.6f}\n"
+        f"Overall: {np.mean(overall_mean_diffs):.6f}\n"
+    )
+    with open(results_file, "w") as file:
+        file.write(results_text)
+    print(f"Application inference results saved to {results_file}")
