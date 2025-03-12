@@ -65,14 +65,14 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
     # Ensure values are clipped to [-1, 1] to avoid numerical errors in arccos
     cos_alpha = torch.clamp(cos_alpha, -1.0, 1.0)
     # Compute angle alpha in radians
-    actual_noise_u_alpha = torch.acos(cos_alpha)  # Shape: [64, 32]
+    actual_noise_alpha = torch.acos(cos_alpha)  #full possible noise in angle between noisy and clean u
 
 
     # Optionally add Gaussian noise to the actual noise
     if add_gaussian_noise:
         # Generate Gaussian noise
         gaussian_noise_pos = torch.randn_like(actual_noise_pos)
-        gaussian_noise_u_alpha = torch.randn_like(actual_noise_u_alpha)
+        gaussian_noise_alpha = torch.randn_like(actual_noise_alpha)
         gaussian_noise_theta = torch.randn_like(actual_noise_theta)
         
         # Normalize the Gaussian noise to have unit norm
@@ -89,12 +89,12 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
         
         #scale the normalized noise (to match force/trajectorz noise scale / to not have noise from gaussian which is way higher then the actual noise)
         gaussian_noise_pos = gaussian_noise_pos * torch.norm(actual_noise_pos)  # Scale to match actual_noise norm
-        gaussian_noise_u_alpha = gaussian_noise_u_alpha * torch.norm(actual_noise_u_alpha)  # Scale to match actual_noise norm
+        gaussian_noise_u_alpha = gaussian_noise_alpha * torch.norm(actual_noise_alpha)  # Scale to match actual_noise norm
         gaussian_noise_theta = gaussian_noise_theta * torch.norm(actual_noise_theta)  # Scale to match actual_noise norm
         
         # Add the normalized Gaussian noise to the actual noise
         actual_noise_pos += gaussian_noise_pos
-        actual_noise_u_alpha += gaussian_noise_u_alpha
+        actual_noise_alpha += gaussian_noise_alpha
         actual_noise_theta += gaussian_noise_theta
 
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
@@ -118,30 +118,19 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
     noisy_theta_output = torch.sqrt(alpha_bar[t]) * clean_theta + torch.sqrt(1 - alpha_bar[t]) * actual_noise_theta
 
     # Compute noisy rotation angle at timestep t
-    noisy_alpha = torch.sqrt(alpha_bar[t]) * actual_noise_u_alpha  # Shape: [64, 32]
-
-    # Compute the delta noise (ground truth for training)
-    delta_alpha = actual_noise_u_alpha - noisy_alpha 
-
-    # Reconstruct Noisy U Using SLERP (Spherical Linear Interpolation)
-    w = torch.sqrt(1 - alpha_bar[t])
-    sin_noisy_alpha = torch.sin(noisy_alpha)  # Use noisy_alpha
-    sin_noisy_alpha = torch.where(sin_noisy_alpha > 1e-8, sin_noisy_alpha, torch.ones_like(sin_noisy_alpha) * 1e-8)
+    noisy_alpha =  torch.sqrt(1 - alpha_bar[t]) * actual_noise_alpha# + torch.sqrt(alpha_bar[t]) * 0 -  cause for clean alpha the angle is 0
     
-    coeff_clean = torch.sin((1 - w) * noisy_alpha) / sin_noisy_alpha  # Use noisy_alpha
-    coeff_noisy = torch.sin(w * noisy_alpha) / sin_noisy_alpha  # Use noisy_alpha
-
-    # Expand to match shape [64, 32, 1]
-    coeff_clean = coeff_clean.unsqueeze(-1)
-    coeff_noisy = coeff_noisy.unsqueeze(-1)
-
-    # Compute final noisy u output
-    noisy_u_output = coeff_clean * clean_u + coeff_noisy * noisy_u
+    #calculate the noisy_u based on the clean_u and the add noisy_alpha and expand to [64,32,-1]
+    #calculate the prependicular component v to reconstruct the noisy_u
+    v = noisy_u - (torch.sum(clean_u * noisy_u, dim=-1, keepdim=True) * clean_u)
+    v = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-8)  # Normalize v, avoid division by zero
+    # Compute noisy_u_output using rotation formula
+    noisy_u_output = torch.cos(noisy_alpha).unsqueeze(-1) * clean_u + torch.sin(noisy_alpha).unsqueeze(-1) * v
 
     # Noise scale
     noise_scale = 1 / torch.sqrt(alpha_bar[t])
 
-    return noisy_pos_output, noisy_u_output, delta_alpha, noisy_theta_output, noise_scale
+    return noisy_pos_output, noisy_u_output, noisy_alpha, noisy_theta_output, noise_scale
 
 
 def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):

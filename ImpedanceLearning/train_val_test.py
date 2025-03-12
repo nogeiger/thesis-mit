@@ -69,7 +69,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_pos, noisy_u, delta_alpha, noisy_theta, noise_scale = add_noise(clean_pos, complete_noisy_pos, 
+            noisy_pos, noisy_u, ground_truth_alpha, noisy_theta, noise_scale = add_noise(clean_pos, complete_noisy_pos, 
                                         clean_u, complete_noisy_u, clean_theta, complete_noisy_theta,
                                         force, moment,
                                         noiseadding_steps, beta_start, 
@@ -82,7 +82,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             else:
                 actual_noise_pos = noisy_pos - clean_pos  # Default noise
 
-            actual_noise_u = noisy_u - clean_u
+
             actual_noise_theta = noisy_theta - clean_theta
 
             optimizer.zero_grad()
@@ -95,7 +95,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
                 predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
             
             # Calculate loss and perform backward pass
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], delta_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], ground_truth_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
@@ -190,7 +190,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_pos, noisy_u, delta_alpha, noisy_theta, noise_scale = add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta,
+            noisy_pos, noisy_u, ground_truth_alpha, noisy_theta, noise_scale = add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta,
                                         force, moment,
                                         max_noiseadding_steps, beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
@@ -201,7 +201,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
             else:
                 actual_noise_pos = noisy_pos - clean_pos  # Default: noise is the diff
 
-            actual_noise_u = noisy_u - clean_u
+
             actual_noise_theta = noisy_theta - clean_theta
 
             # Predict the noise from the noisy pos
@@ -211,7 +211,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
 
             # Calculate loss
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], delta_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], ground_truth_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -262,15 +262,19 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         noisy_theta = noisy_theta.unsqueeze(0).to(device)
         force = force.unsqueeze(0).to(device)
         moment = moment.unsqueeze(0).to(device)
+
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
         denoised_u = noisy_u.clone()
         denoised_theta = noisy_theta.clone()
         for _ in range(num_denoising_steps):
             predicted_noise = model(denoised_pos, denoised_u, denoised_theta, force, moment) if use_forces else model(denoised_pos, denoised_u, denoised_theta)
+
+
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
-            denoised_u = denoised_u - predicted_noise[:,:,3:6]
             denoised_theta = denoised_theta - predicted_noise[:,:,-1].unsqueeze(-1)
+
+            denoised_u = denoised_u - predicted_noise[:,:,3:6]
 
 
         # Denormalize trajectories
