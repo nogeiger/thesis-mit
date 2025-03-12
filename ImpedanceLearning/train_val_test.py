@@ -274,9 +274,23 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_theta = denoised_theta - predicted_noise[:,:,-1].unsqueeze(-1)
 
-            denoised_u = denoised_u - predicted_noise[:,:,3:6]
+            # Extract the predicted alpha (rotation noise)
+            predicted_alpha = predicted_noise[:, :, -2]  # Shape: [batch, seq_length]
+
+            # Choose a reference vector r that is not parallel to u_noisy
+            r = torch.tensor([1.0, 0.0, 0.0], device=noisy_u.device).expand_as(noisy_u)
+            r = torch.where(torch.abs(noisy_u) < 0.9, r, torch.tensor([0.0, 1.0, 0.0], device=noisy_u.device).expand_as(noisy_u))
+
+            # Compute perpendicular component v
+            v = r - (torch.sum(r * noisy_u, dim=-1, keepdim=True) * noisy_u)
+            v = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-8)  # Normalize v
+
+            # Compute denoised_u using inverse rotation formula
+            denoised_u = torch.cos(predicted_alpha).unsqueeze(-1) * noisy_u - torch.sin(predicted_alpha).unsqueeze(-1) * v
 
 
+
+    
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -304,19 +318,40 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
             # Apply smoothing using a moving average filter
             window_size = 20  # Adjust the window size based on smoothing needs
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
-            denoised_u_np = uniform_filter1d(denoised_u_np, size=window_size, axis=1, mode='nearest')
             denoised_theta_np = uniform_filter1d(denoised_theta_np, size=window_size, axis=1, mode='nearest')
+            #TO DO: Think about smooting and offset of u
+            #denoised_u_np = uniform_filter1d(denoised_u_np, size=window_size, axis=1, mode='nearest')
 
 
 
             # Compute the offset using the average of the first 5 points difference
             offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
-            offset_u = np.mean(clean_u_np[:, :1, :] - denoised_u_np[:, :1, :], axis=1)
             offset_theta = np.mean(clean_theta_np[:, :1, :] - denoised_theta_np[:, :1, :], axis=1)
+            #remove offset from denoised u
             # Apply the offset to all points in the denoised pos
             denoised_pos_np += offset_pos[:, np.newaxis, :]
-            denoised_u_np += offset_u[:, np.newaxis, :]
             denoised_theta_np += offset_theta[:, np.newaxis, :]
+ 
+            # Apply rotation correction for offset of u_np --> rotation matrix needed for unit vectors
+            # Compute cosine similarity (dot product)
+            cos_alpha_offset = np.sum(clean_u_np[:, 0, :] * denoised_u_np[:, 0, :], axis=-1)
+            cos_alpha_offset = np.clip(cos_alpha_offset, -1.0, 1.0)  # Ensure valid arccos range
+
+            # Compute the rotation angle
+            alpha_offset = np.arccos(cos_alpha_offset)  # Shape: [batch_size]
+
+            # Compute perpendicular rotation axis v using cross product
+            v = np.cross(denoised_u_np[:, 0, :], clean_u_np[:, 0, :])
+
+            # Normalize v to unit length
+            v /= np.linalg.norm(v, axis=-1, keepdims=True) + 1e-8  # Avoid division by zero
+
+            # Apply rotation correction to all time steps
+            denoised_u_np = np.cos(alpha_offset)[:, np.newaxis, np.newaxis] * denoised_u_np - np.sin(alpha_offset)[:, np.newaxis, np.newaxis] * v
+
+
+            print("denoised_u", denoised_u)
+            print("clean_u", clean_u_np)
 
 
         # Compute mean absolute differences
@@ -351,12 +386,12 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
 
         # Plot clean vs denoised pos (Y-axis only) with thicker lines
-        ax_traj.plot(clean_u_np[0, :, 0], label='Clean (ground truth) x', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) x', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_u_np[0, :, 1], label='Clean (ground truth) y', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) y', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_u_np[0, :, 2], label='Clean (ground truth) z', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) z', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_u_np[0, :, 0], label='Clean (ground truth) ux', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) ux', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_u_np[0, :, 1], label='Clean (ground truth) uy', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) uy', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_u_np[0, :, 2], label='Clean (ground truth) uz', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_u_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) uz', linewidth=3.5, color='darkgreen')
 
    
         # Customize plot appearance with bold labels and increased font size

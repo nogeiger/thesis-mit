@@ -19,11 +19,11 @@ def main():
     """ 
     
     # Definition of parameters
-    seq_length = 32 #seq len of data
+    seq_length = 3 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 1024#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
-    batch_size =64 #batch size
-    num_epochs = 500 #number of epochs
+    batch_size =1 #batch size
+    num_epochs = 5#00 #number of epochs
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -63,12 +63,16 @@ def main():
     # Load real data
     data = load_robot_data(file_path, seq_length, use_overlap=True)
     
+
+    
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
-
+    
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
 
+    
+    
     
     # Define split ratios
     train_ratio = 0.65 
@@ -87,6 +91,8 @@ def main():
     test_data = normalized_data[val_split:test_split]
     application_data = normalized_data[test_split:]
 
+    
+
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
@@ -101,6 +107,7 @@ def main():
     print(f"Total sequences loaded: {len(test_dataset)} for training, {len(test_dataset)} for validation.")
     print(f"Total batches per epoch: {len(test_loader)} (Expected: {len(test_dataset) // 64})")
 
+    '''
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_name = "FF"
@@ -188,16 +195,16 @@ def main():
     os.makedirs(save_path_test_processed, exist_ok=True)
 
 
-
+    
     # Testing
     # Load best model
     best_model_path = os.path.join(save_path, "best_model.pth")
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.to(device)
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=False)
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=1, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=1, postprocessing=True)
 
-    '''
+    
     #Inference application
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
     os.makedirs(save_path_application, exist_ok=True)

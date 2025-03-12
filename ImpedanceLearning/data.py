@@ -19,68 +19,40 @@ def compute_statistics_per_axis(data):
     Returns:
         dict: A dictionary containing min and max for each axis (x, y, z) for both clean and noisy trajectories.
     """
-    # Concatenate both clean (pos_0) and noisy (pos) trajectories for each sample
-    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
-    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
-    u_0_data = np.concatenate([sample["u_0"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
-    u_data = np.concatenate([sample["u"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
-    theta_0_data = np.concatenate([sample["theta_0"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 1]
-    theta_data = np.concatenate([sample["theta"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 1]
-    force_data = np.concatenate([sample["force"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
-    moment_data = np.concatenate([sample["moment"] for sample in data], axis=0).astype(np.float32)  # Shape: [total_points, 3]
+    # Concatenate positional data
+    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0).astype(np.float32)
+    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0).astype(np.float32)
+    force_data = np.concatenate([sample["force"] for sample in data], axis=0).astype(np.float32)
+    moment_data = np.concatenate([sample["moment"] for sample in data], axis=0).astype(np.float32)
 
-    # Calculate min and max values for each axis (x, y, z) separately
-    min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
-    max_vals_pos_0 = torch.tensor(np.max(pos_0_data, axis=0), dtype=torch.float32)  # Max for clean (pos_0)
+    
+    # Compute min/max for each component
+    min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)
+    max_vals_pos_0 = torch.tensor(np.max(pos_0_data, axis=0), dtype=torch.float32)
+    min_vals_pos = torch.tensor(np.min(pos_data, axis=0), dtype=torch.float32)
+    max_vals_pos = torch.tensor(np.max(pos_data, axis=0), dtype=torch.float32)
+    min_vals_force = torch.tensor(np.min(force_data, axis=0), dtype=torch.float32)
+    max_vals_force = torch.tensor(np.max(force_data, axis=0), dtype=torch.float32)
+    min_vals_moment = torch.tensor(np.min(moment_data, axis=0), dtype=torch.float32)
+    max_vals_moment = torch.tensor(np.max(moment_data, axis=0), dtype=torch.float32)
 
-    min_vals_pos = torch.tensor(np.min(pos_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_pos = torch.tensor(np.max(pos_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
-
-    min_vals_u_0 = torch.tensor(np.min(u_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
-    max_vals_u_0 = torch.tensor(np.max(u_0_data, axis=0), dtype=torch.float32)  # Max for clean (pos_0)
-
-    min_vals_u = torch.tensor(np.min(u_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_u = torch.tensor(np.max(u_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
-
-    min_vals_theta_0 = torch.tensor(np.min(theta_0_data, axis=0), dtype=torch.float32)  # Min for clean (pos_0)
-    max_vals_theta_0 = torch.tensor(np.max(theta_0_data, axis=0), dtype=torch.float32)  # Max for clean (pos_0)
-
-    min_vals_theta = torch.tensor(np.min(theta_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_theta = torch.tensor(np.max(theta_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
-
-    min_vals_force = torch.tensor(np.min(force_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_force = torch.tensor(np.max(force_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
-
-    min_vals_moment = torch.tensor(np.min(moment_data, axis=0), dtype=torch.float32)  # Min for noisy (pos)
-    max_vals_moment = torch.tensor(np.max(moment_data, axis=0), dtype=torch.float32)  # Max for noisy (pos)
 
     # Prevent division by zero for constant axes in both pos_0 and pos
     epsilon = 1e-8
     max_vals_pos_0 = torch.where(max_vals_pos_0 == min_vals_pos_0, max_vals_pos_0 + epsilon, max_vals_pos_0)
     max_vals_pos = torch.where(max_vals_pos == min_vals_pos, max_vals_pos + epsilon, max_vals_pos)
-    max_vals_u_0 = torch.where(max_vals_u_0 == min_vals_u_0, max_vals_u_0 + epsilon, max_vals_u_0)
-    max_vals_u = torch.where(max_vals_u == min_vals_u, max_vals_u + epsilon, max_vals_u)
-    max_vals_theta_0 = torch.where(max_vals_theta_0 == min_vals_theta_0, max_vals_theta_0 + epsilon, max_vals_theta_0)
-    max_vals_theta = torch.where(max_vals_theta == min_vals_theta, max_vals_theta + epsilon, max_vals_theta)
     max_vals_force = torch.where(max_vals_force == min_vals_force, max_vals_force + epsilon, max_vals_force)
     max_vals_moment = torch.where(max_vals_moment == min_vals_moment, max_vals_moment + epsilon, max_vals_moment)
 
 
 
     # Return the min and max for both pos_0 (clean) and pos (noisy), per axis (x, y, z)
+    #Quaternions are already unit
     return {
         "min_pos_0": min_vals_pos_0, 
         "max_pos_0": max_vals_pos_0, 
         "min_pos": min_vals_pos, 
         "max_pos": max_vals_pos,
-        "min_u_0": min_vals_u_0,
-        "max_u_0": max_vals_u_0,
-        "min_u": min_vals_u,
-        "max_u": max_vals_u,
-        "min_theta_0": min_vals_theta_0,
-        "max_theta_0": max_vals_theta_0,
-        "min_theta": min_vals_theta,
-        "max_theta": max_vals_theta,
         "min_force": min_vals_force,
         "max_force": max_vals_force,
         "min_moment": min_vals_moment,
@@ -90,37 +62,29 @@ def compute_statistics_per_axis(data):
 
 def normalize_data_per_axis(data, stats):
     """
-    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories, and also normalizes the forces.
+    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories, 
+    as well as quaternions, forces, and moments.
     
     Args:
-        data (list): A list of dictionaries containing clean and noisy trajectories and forces.
-        stats (dict): Min and max values for normalization for both clean and noisy trajectories and forces.
+        data (list): A list of dictionaries containing clean and noisy trajectories, quaternions, and forces.
+        stats (dict): Min and max values for normalization for both clean and noisy trajectories, quaternions, and forces.
     
     Returns:
-        list: A list of dictionaries with normalized clean (pos_0), noisy (pos), and forces.
+        list: A list of dictionaries with normalized clean (pos_0), noisy (pos), quaternions, and forces.
     """
     normalized_data = []
-    
+    #Quaternions are already unit
     for sample in data:
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
         pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
-        u_0 = torch.tensor(sample["u_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
-        u = torch.tensor(sample["u"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
-        theta_0 = torch.tensor(sample["theta_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 1]
-        theta = torch.tensor(sample["theta"], dtype=torch.float32)  # Noisy trajectory [seq_length, 1]        
         forces = torch.tensor(sample["force"], dtype=torch.float32)  # Forces [seq_length, 3]
         moments = torch.tensor(sample["moment"], dtype=torch.float32)  # Forces [seq_length, 3]
 
         # Retrieve min and max values for both clean and noisy trajectories and forces
         min_vals_pos_0, max_vals_pos_0 = stats["min_pos_0"], stats["max_pos_0"]
         min_vals_pos, max_vals_pos = stats["min_pos"], stats["max_pos"]
-        min_vals_u_0, max_vals_u_0 = stats["min_u_0"], stats["max_u_0"]
-        min_vals_u, max_vals_u = stats["min_u"], stats["max_u"]
-        min_vals_theta_0, max_vals_theta_0 = stats["min_theta_0"], stats["max_theta_0"]
-        min_vals_theta, max_vals_theta = stats["min_theta"], stats["max_theta"]        
         min_vals_force, max_vals_force = stats["min_force"], stats["max_force"]
         min_vals_moment, max_vals_moment = stats["min_moment"], stats["max_moment"]
-
  
 
         # Normalize clean trajectory (pos_0)
@@ -134,30 +98,6 @@ def normalize_data_per_axis(data, stats):
         is_constant_pos = range_vals_pos == 0  # Check for constant value per axis
         range_vals_pos = torch.where(is_constant_pos, torch.ones_like(range_vals_pos), range_vals_pos)
         normalized_pos = (pos - min_vals_pos) / range_vals_pos
-
-        # Normalize clean trajectory (u_0)
-        range_vals_u_0 = max_vals_u_0 - min_vals_u_0
-        is_constant_u_0 = range_vals_u_0 == 0  # Check for constant value per axis
-        range_vals_u_0 = torch.where(is_constant_u_0, torch.ones_like(range_vals_u_0), range_vals_u_0)
-        normalized_u_0 = (u_0 - min_vals_u_0) / range_vals_u_0
-
-        # Normalize noisy trajectory (u)
-        range_vals_u = max_vals_u - min_vals_u
-        is_constant_u = range_vals_u == 0
-        range_vals_u = torch.where(is_constant_u, torch.ones_like(range_vals_u), range_vals_u)
-        normalized_u = (u - min_vals_u) / range_vals_u
-
-        # Normalize clean trajectory (theta_0)
-        range_vals_theta_0 = max_vals_theta_0 - min_vals_theta_0
-        is_constant_theta_0 = range_vals_theta_0 == 0  # Check for constant value per axis
-        range_vals_theta_0 = torch.where(is_constant_theta_0, torch.ones_like(range_vals_theta_0), range_vals_theta_0)
-        normalized_theta_0 = (theta_0 - min_vals_theta_0) / range_vals_theta_0
-
-        # Normalize noisy trajectory (theta)
-        range_vals_theta = max_vals_theta - min_vals_theta
-        is_constant_theta = range_vals_theta == 0
-        range_vals_theta = torch.where(is_constant_theta, torch.ones_like(range_vals_theta), range_vals_theta)
-        normalized_theta = (theta - min_vals_theta) / range_vals_theta
 
         # Normalize forces
         range_vals_force = max_vals_force - min_vals_force
@@ -177,14 +117,6 @@ def normalize_data_per_axis(data, stats):
                 normalized_pos_0[:, axis] = 0.5
             if is_constant_pos[axis].item():
                 normalized_pos[:, axis] = 0.5
-            if is_constant_u_0[axis].item():
-                normalized_u_0[:, axis] = 0.5
-            if is_constant_u[axis].item():
-                normalized_u[:, axis] = 0.5
-            if is_constant_theta_0:
-                normalized_theta_0[:, axis] = 0.5
-            if is_constant_theta:
-                normalized_theta[:, axis] = 0.5
             if is_constant_force[axis].item():
                 normalized_force[:, axis] = 0.5
             if is_constant_moment[axis].item():
@@ -195,14 +127,6 @@ def normalize_data_per_axis(data, stats):
             print("Error: Found inf/nan in normalized_pos_0:", normalized_pos_0)
         if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
             print("Error: Found inf/nan in normalized_pos:", normalized_pos)
-        if torch.any(torch.isinf(normalized_u_0)) or torch.any(torch.isnan(normalized_u_0)):
-            print("Error: Found inf/nan in normalized_u_0:", normalized_u_0)
-        if torch.any(torch.isinf(normalized_u)) or torch.any(torch.isnan(normalized_u)):
-            print("Error: Found inf/nan in normalized_u:", normalized_u)
-        if torch.any(torch.isinf(normalized_theta_0)) or torch.any(torch.isnan(normalized_theta_0)):
-            print("Error: Found inf/nan in normalized_theta_0:", normalized_theta_0)
-        if torch.any(torch.isinf(normalized_theta)) or torch.any(torch.isnan(normalized_theta)):
-            print("Error: Found inf/nan in normalized_theta:", normalized_theta)
         if torch.any(torch.isinf(normalized_force)) or torch.any(torch.isnan(normalized_force)):
             print("Error: Found inf/nan in normalized_force:", normalized_force)
         if torch.any(torch.isinf(normalized_moment)) or torch.any(torch.isnan(normalized_moment)):
@@ -212,10 +136,6 @@ def normalize_data_per_axis(data, stats):
         normalized_data.append({
             "pos_0": normalized_pos_0,
             "pos": normalized_pos,
-            "u_0": normalized_u_0,
-            "u": normalized_u,
-            "theta_0": normalized_theta_0,
-            "theta": normalized_theta,
             "force": normalized_force,
             "moment": normalized_moment
         })
@@ -223,6 +143,23 @@ def normalize_data_per_axis(data, stats):
     return normalized_data
 
 
+def axis_angle_to_quaternion(axis, angle):
+    """
+    Converts an axis-angle representation to a quaternion.
+    :param axis: [N, 3] array representing the rotation axis
+    :param angle: [N, 1] array representing the rotation angle in radians
+    :return: [N, 4] array representing the quaternion (w, x, y, z)
+    """
+    half_angle = angle / 2.0
+    sin_half_angle = np.sin(half_angle)
+    q_w = np.cos(half_angle)
+    q_xyz = axis * sin_half_angle  # Element-wise multiplication
+    return np.concatenate([q_w, q_xyz], axis=-1)  # Shape: [N, 4]
+
+def is_unit_quaternion(q, tolerance=1e-2):
+    """Checks if a quaternion is a unit quaternion within a given tolerance."""
+    norms = np.linalg.norm(q, axis=1)
+    return np.all(np.abs(norms - 1.0) < tolerance)
 
 # Data Generation for synthetic data
 def generate_data(num_samples=10000, seq_length=100):
@@ -300,61 +237,44 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                 # Extract clean trajectories for x, y, z and stack them
                 #for i in range(0, len(df) - seq_length + 1, seq_length):
                 for i in range(0, len(df) - seq_length + 1, stride):  #overlapping slicing with stride 10
-                    clean_trajectory = np.stack([
-                        df["x0"].iloc[i:i + seq_length].values,
-                        df["y0"].iloc[i:i + seq_length].values,
-                        df["z0"].iloc[i:i + seq_length].values,
-                    ], axis=-1)  # Shape: [seq_length, 3]
+                    clean_trajectory = np.stack([df["x0"].iloc[i:i + seq_length].values,
+                                                 df["y0"].iloc[i:i + seq_length].values,
+                                                 df["z0"].iloc[i:i + seq_length].values], axis=-1)
+                    noisy_trajectory = np.stack([df["x"].iloc[i:i + seq_length].values,
+                                                 df["y"].iloc[i:i + seq_length].values,
+                                                 df["z"].iloc[i:i + seq_length].values], axis=-1)
+                    clean_rotation_axis = np.stack([df["u0_x"].iloc[i:i + seq_length].values,
+                                                    df["u0_y"].iloc[i:i + seq_length].values,
+                                                    df["u0_z"].iloc[i:i + seq_length].values], axis=-1)
+                    noisy_rotation_axis = np.stack([df["u_x"].iloc[i:i + seq_length].values,
+                                                    df["u_y"].iloc[i:i + seq_length].values,
+                                                    df["u_z"].iloc[i:i + seq_length].values], axis=-1)
+                    clean_angle = np.stack([df["theta0"].iloc[i:i + seq_length].values], axis=-1)
+                    noisy_angle = np.stack([df["theta"].iloc[i:i + seq_length].values], axis=-1)
+                    clean_quaternion = axis_angle_to_quaternion(clean_rotation_axis, clean_angle)
+                    noisy_quaternion = axis_angle_to_quaternion(noisy_rotation_axis, noisy_angle)
 
-                    noisy_trajectory = np.stack([
-                        df["x"].iloc[i:i + seq_length].values,
-                        df["y"].iloc[i:i + seq_length].values,
-                        df["z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)  # Shape: [seq_length, 3]
+                    # Check if quaternions are unit quaternions
+                    if not is_unit_quaternion(clean_quaternion):
+                        print(f"Warning: Non-unit quaternion detected in {filename} (clean).")
+                    if not is_unit_quaternion(noisy_quaternion):
+                        print(f"Warning: Non-unit quaternion detected in {filename} (noisy).")
 
-                    clean_angle = np.stack([
-                        df["theta"].iloc[i:i + seq_length].values,
-                    ], axis=-1)
 
-                    noisy_angle = np.stack([
-                        df["theta0"].iloc[i:i + seq_length].values,
-                    ], axis=-1)
-
-                    clean_rotation_axis = np.stack([
-                        df["u0_x"].iloc[i:i + seq_length].values,
-                        df["u0_y"].iloc[i:i + seq_length].values,
-                        df["u0_z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)
-
-                    noisy_rotation_axis = np.stack([
-                        df["u_x"].iloc[i:i + seq_length].values,
-                        df["u_y"].iloc[i:i + seq_length].values,
-                        df["u_z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)
-
-                    # Extract forces
-                    forces = np.stack([
-                        df["f_x"].iloc[i:i + seq_length].values,
-                        df["f_y"].iloc[i:i + seq_length].values,
-                        df["f_z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)  # Shape: [seq_length, 3]
-
-                    moments = np.stack([
-                        df["m_x"].iloc[i:i + seq_length].values,
-                        df["m_y"].iloc[i:i + seq_length].values,
-                        df["m_z"].iloc[i:i + seq_length].values,
-                    ], axis=-1)
-
+                    forces = np.stack([df["f_x"].iloc[i:i + seq_length].values,
+                                       df["f_y"].iloc[i:i + seq_length].values,
+                                       df["f_z"].iloc[i:i + seq_length].values], axis=-1)
+                    moments = np.stack([df["m_x"].iloc[i:i + seq_length].values,
+                                        df["m_y"].iloc[i:i + seq_length].values,
+                                        df["m_z"].iloc[i:i + seq_length].values], axis=-1)
+                    
                     sample = {
                         "pos_0": clean_trajectory,
                         "pos": noisy_trajectory,
-                        "u_0": clean_rotation_axis,
-                        "u": noisy_rotation_axis,
-                        "theta_0": clean_angle,
-                        "theta": noisy_angle,
-                        "force": forces,  # Add forces to the sample
+                        "q_0": clean_quaternion,  # Replaces u_0 and theta_0
+                        "q": noisy_quaternion,  # Replaces u and theta
+                        "force": forces,
                         "moment": moments
-                        
                     }
                     file_data.append(sample)
 
@@ -389,10 +309,9 @@ class ImpedanceDatasetInitial(Dataset):
             torch.tensor(sample["timestamp"], dtype=torch.float32),
             torch.tensor(sample["pos_0"], dtype=torch.float32),
             torch.tensor(sample["pos"], dtype=torch.float32),
-            torch.tensor(sample["u_0"], dtype=torch.float32),
-            torch.tensor(sample["u"], dtype=torch.float32),
-            torch.tensor(sample["theta_0"], dtype=torch.float32),
-            torch.tensor(sample["theta"], dtype=torch.float),
+            torch.tensor(sample["q_0"], dtype=torch.float32),
+            torch.tensor(sample["q"], dtype=torch.float32),
+
             torch.tensor(sample["force"], dtype=torch.float32),
             torch.tensor(sample["moment"], dtype=torch.float32),
         )
@@ -425,13 +344,11 @@ class ImpedanceDatasetDiffusion(Dataset):
         sample = self.data[idx]
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32) 
         pos = torch.tensor(sample["pos"], dtype=torch.float32) 
-        u_0 = torch.tensor(sample["u_0"], dtype=torch.float32)
-        u = torch.tensor(sample["u"], dtype=torch.float32)
-        theta_0 = torch.tensor(sample["theta_0"], dtype=torch.float32)
-        theta = torch.tensor(sample["theta"], dtype=torch.float32)
+        q_0 = torch.tensor(sample["q_0"], dtype=torch.float32)
+        q = torch.tensor(sample["q"], dtype=torch.float32)
         force = torch.tensor(sample["force"], dtype=torch.float32) 
         moment = torch.tensor(sample["moment"], dtype=torch.float32) 
-        return pos_0, pos, u_0, u, theta_0, theta, force, moment
+        return pos_0, pos, q_0, q,force, moment
 
     def denormalize(self, normalized_data, trajectory_type="pos_0"):
         """
@@ -452,18 +369,14 @@ class ImpedanceDatasetDiffusion(Dataset):
             elif trajectory_type == "pos":  # Use noisy trajectory statistics
                 min_vals = self.stats["min_pos"]
                 max_vals = self.stats["max_pos"]
-            elif trajectory_type == "u_0":  # Use clean trajectory statistics
-                min_vals = self.stats["min_u_0"]
-                max_vals = self.stats["max_u_0"]
-            elif trajectory_type == "u":  # Use noisy trajectory statistics
-                min_vals = self.stats["min_u"]
-                max_vals = self.stats["max_u"]
-            elif trajectory_type == "theta_0":  # Use clean trajectory statistics
-                min_vals = self.stats["min_theta_0"]
-                max_vals = self.stats["max_theta_0"]
-            elif trajectory_type == "theta":  # Use noisy trajectory statistics
-                min_vals = self.stats["min_theta"]
-                max_vals = self.stats["max_theta"]
+            elif trajectory_type == "q_0":
+                if not np.all(is_unit_quaternion(normalized_data.numpy())):
+                    print("Warning: Denormalized q_0 is not a unit quaternion.")
+                return normalized_data  # Quaternions should remain unit-length
+            elif trajectory_type == "q":
+                if not np.all(is_unit_quaternion(normalized_data.numpy())):
+                    print("Warning: Denormalized q is not a unit quaternion.")
+                return normalized_data  # Quaternions should remain unit-length
             elif trajectory_type == "force":  # Use noisy trajectory statistics
                 min_vals = self.stats["min_force"]
                 max_vals = self.stats["max_force"]
