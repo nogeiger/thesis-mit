@@ -56,21 +56,19 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         total_loss = 0
         
         # Use tqdm to create a progress bar
-        for batch_idx, (pos_0, pos, u_0, u, theta_0, theta, force, moment) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
             # Move data to device
             clean_pos = pos_0.to(device)
             complete_noisy_pos = pos.to(device)
-            clean_u = u_0.to(device)
-            complete_noisy_u = u.to(device)
-            clean_theta = theta_0.to(device)
-            complete_noisy_theta = theta.to(device)
+            clean_q = q_0.to(device)
+            complete_noisy_q = q.to(device)
             force = force.to(device)
             moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_pos, noisy_u, ground_truth_alpha, noisy_theta, noise_scale = add_noise(clean_pos, complete_noisy_pos, 
-                                        clean_u, complete_noisy_u, clean_theta, complete_noisy_theta,
+            noisy_pos, noisy_q, noise_scale = add_noise(clean_pos, complete_noisy_pos, 
+                                        clean_q, complete_noisy_q,
                                         force, moment,
                                         noiseadding_steps, beta_start, 
                                         beta_end, noise_with_force, add_gaussian_noise)
@@ -82,19 +80,20 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             else:
                 actual_noise_pos = noisy_pos - clean_pos  # Default noise
 
-
-            actual_noise_theta = noisy_theta - clean_theta
+            #Calc actual noise for q
 
             optimizer.zero_grad()
 
             # Predict the noise from the noisy pos
             if use_forces:
-                predicted_noise = model(noisy_pos, noisy_u, noisy_theta, force, moment)
+                predicted_noise = model(noisy_pos, noisy_q, force, moment)
             
             else:
-                predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
+                predicted_noise = model(noisy_pos, noisy_q)
             
             # Calculate loss and perform backward pass
+
+            #ChANGE LOSS FOR Quaternion (maybe also to have a unit quaternion)
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], ground_truth_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()

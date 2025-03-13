@@ -77,6 +77,8 @@ def normalize_data_per_axis(data, stats):
     for sample in data:
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
         pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
+        q_0 = torch.tensor(sample["q_0"], dtype=torch.float32)  # Clean quaternion [seq_length, 4]
+        q = torch.tensor(sample["q"], dtype=torch.float32)  # Noisy quaternion [seq_length, 4]
         forces = torch.tensor(sample["force"], dtype=torch.float32)  # Forces [seq_length, 3]
         moments = torch.tensor(sample["moment"], dtype=torch.float32)  # Forces [seq_length, 3]
 
@@ -136,6 +138,8 @@ def normalize_data_per_axis(data, stats):
         normalized_data.append({
             "pos_0": normalized_pos_0,
             "pos": normalized_pos,
+            "q_0": q_0,
+            "q": q,
             "force": normalized_force,
             "moment": normalized_moment
         })
@@ -305,13 +309,13 @@ class ImpedanceDatasetInitial(Dataset):
 
     def __getitem__(self, idx):
         sample = self.data[idx]
+        print(sample.keys())
         return (
             torch.tensor(sample["timestamp"], dtype=torch.float32),
             torch.tensor(sample["pos_0"], dtype=torch.float32),
             torch.tensor(sample["pos"], dtype=torch.float32),
             torch.tensor(sample["q_0"], dtype=torch.float32),
             torch.tensor(sample["q"], dtype=torch.float32),
-
             torch.tensor(sample["force"], dtype=torch.float32),
             torch.tensor(sample["moment"], dtype=torch.float32),
         )
@@ -341,6 +345,7 @@ class ImpedanceDatasetDiffusion(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
+
         sample = self.data[idx]
         pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32) 
         pos = torch.tensor(sample["pos"], dtype=torch.float32) 
@@ -348,7 +353,7 @@ class ImpedanceDatasetDiffusion(Dataset):
         q = torch.tensor(sample["q"], dtype=torch.float32)
         force = torch.tensor(sample["force"], dtype=torch.float32) 
         moment = torch.tensor(sample["moment"], dtype=torch.float32) 
-        return pos_0, pos, q_0, q,force, moment
+        return pos_0, pos, q_0, q, force, moment
 
     def denormalize(self, normalized_data, trajectory_type="pos_0"):
         """

@@ -6,6 +6,53 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy.spatial.transform import Rotation as R
+
+def quaternion_inverse(q):
+    """Computes the inverse of a unit quaternion q = (w, x, y, z)."""
+    q_inv = q.clone()
+    q_inv[..., 1:] *= -1  # Negate x, y, z components
+    return q_inv
+
+def quaternion_multiply(q1, q2):
+    """Computes the Hamilton product of two quaternions q1 and q2."""
+    w1, x1, y1, z1 = q1.unbind(-1)
+    w2, x2, y2, z2 = q2.unbind(-1)
+
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+
+    return torch.stack((w, x, y, z), dim=-1)
+
+def slerp(q0, q1, t):
+    """Performs Spherical Linear Interpolation (SLERP) between two quaternions."""
+    # Compute dot product (cosine of the angle)
+    dot_product = torch.sum(q0 * q1, dim=-1, keepdim=True)
+
+    # Clamp to prevent numerical errors
+    dot_product = torch.clamp(dot_product, -1.0, 1.0)
+
+    # Compute theta (angle between q0 and q1)
+    theta = torch.acos(dot_product)
+
+    # Compute sin(theta) to avoid division by zero
+    sin_theta = torch.sin(theta)
+
+    # Handle small angles by using linear interpolation
+    small_angle = sin_theta < 1e-6
+    s1 = torch.sin((1 - t) * theta) / (sin_theta + small_angle.float())  # Avoid division by zero
+    s2 = torch.sin(t * theta) / (sin_theta + small_angle.float())
+
+    # SLERP interpolation
+    q_interp = s1 * q0 + s2 * q1
+
+    # Normalize the result to keep it a valid unit quaternion
+    q_interp = q_interp / torch.norm(q_interp, dim=-1, keepdim=True)
+
+    return q_interp
+
 
 
 def loss_function(predicted_noise, actual_noise):
@@ -27,7 +74,7 @@ def loss_function_start_point(predicted_noise, actual_noise, weight_start_point=
     total_loss = mse_loss + weight_start_point * start_point_loss
     return total_loss
 
-def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, force, moment,
+def add_noise(clean_pos, noisy_pos, clean_q, noisy_q, force, moment,
               max_noiseadding_steps, beta_start, beta_end, noise_with_force=False, add_gaussian_noise=False):
     
     """
@@ -37,10 +84,8 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
     Args:
         clean_trajectory (torch.Tensor): The clean trajectory with shape [seq_length, 3].
         noisy_trajectory (torch.Tensor): The noisy trajectory with shape [seq_length, 3].
-        clean_u (torch.Tensor): The clean input force with shape [seq_length, 3].
-        noisy_u (torch.Tensor): The noisy input force with shape [seq_length, 3].
-        clean_theta (torch.Tensor): The clean input angle with shape [seq_length, 1].
-        noisy_theta (torch.Tensor): The noisy input angle with shape [seq_length, 1].
+        clean_q (torch.Tensor): The clean input quaternion with shape [seq_length, 3, 4].
+        noisy_q (torch.Tensor): The noisy input quaternion with shape [seq_length, 3, 4].
         force (torch.Tensor): The force with shape [seq_length, 3].
         moment (torch.Tensor): The moment with shape [seq_length, 3].
         max_noiseadding_steps (int): Maximum number of steps to iteratively add noise.
@@ -57,53 +102,51 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
     else:
         actual_noise_pos = noisy_pos - clean_pos
 
-    actual_noise_theta = noisy_theta - clean_theta
-
-    #use coisne similiarity to calc alpha which is seen as the noise here for u (displacement vector)
-    # Compute cosine similarity directly (dot product since length is 1)
-    cos_alpha = torch.sum(noisy_u * clean_u, dim=-1)  # Shape: [64, 32]
-    # Ensure values are clipped to [-1, 1] to avoid numerical errors in arccos
-    cos_alpha = torch.clamp(cos_alpha, -1.0, 1.0)
-    # Compute angle alpha in radians
-    actual_noise_alpha = torch.acos(cos_alpha)  #full possible noise in angle between noisy and clean u
-
-
     # Optionally add Gaussian noise to the actual noise
     if add_gaussian_noise:
+        #add gaussian noise to pos
         # Generate Gaussian noise
         gaussian_noise_pos = torch.randn_like(actual_noise_pos)
-        gaussian_noise_alpha = torch.randn_like(actual_noise_alpha)
-        gaussian_noise_theta = torch.randn_like(actual_noise_theta)
-        
         # Normalize the Gaussian noise to have unit norm
         norm_pos = torch.norm(gaussian_noise_pos)
-        norm_u_alpha = torch.norm(gaussian_noise_u_alpha)
-        norm_theta = torch.norm(gaussian_noise_theta)
-
         if norm_pos > 0:  # Avoid division by zero
             gaussian_noise_pos = gaussian_noise_pos / norm_pos
-        if norm_u_alpha > 0:  # Avoid division by zero
-            gaussian_noise_u_alpha = gaussian_noise_u_alpha / norm_u_alpha
-        if norm_theta > 0:  # Avoid division by zero
-            gaussian_noise_theta = gaussian_noise_theta / norm_theta
-        
         #scale the normalized noise (to match force/trajectorz noise scale / to not have noise from gaussian which is way higher then the actual noise)
         gaussian_noise_pos = gaussian_noise_pos * torch.norm(actual_noise_pos)  # Scale to match actual_noise norm
-        gaussian_noise_u_alpha = gaussian_noise_alpha * torch.norm(actual_noise_alpha)  # Scale to match actual_noise norm
-        gaussian_noise_theta = gaussian_noise_theta * torch.norm(actual_noise_theta)  # Scale to match actual_noise norm
-        
         # Add the normalized Gaussian noise to the actual noise
         actual_noise_pos += gaussian_noise_pos
-        actual_noise_alpha += gaussian_noise_alpha
-        actual_noise_theta += gaussian_noise_theta
+
+        #add gaussian noise to q_noisy which is the max noise to which we "slerp"/interpolate later with factor alpha
+        # Generate a small random axis-angle perturbation (Gaussian noise)
+        random_axis = torch.randn_like(noisy_q[..., 1:])  # Exclude w-component
+        random_axis = random_axis / torch.norm(random_axis, dim=-1, keepdim=True)  # Normalize to unit vector
+        random_angle = torch.randn(noisy_q.shape[:-1], device=noisy_q.device) * 0.1  # Small perturbation angle
+
+        # Compute the magnitude of noise (like norm in pos)
+        dot_product = torch.sum(clean_q * noisy_q, dim=-1, keepdim=True)
+        dot_product = torch.clamp(dot_product, -1.0, 1.0)  # Avoid numerical errors
+        theta = 2 * torch.acos(torch.abs(dot_product))  # Angular difference
+
+        # Scale noise by quaternion difference (like norm in pos)
+        scaling_factor = (theta / torch.pi).unsqueeze(-1)  # Ensure it has shape [batch_size, 1]
+        scaled_angle = random_angle * scaling_factor  # Scale noise by rotation difference
+
+        # Convert axis-angle perturbation to a noise quaternion
+        sin_half_angle = torch.sin(scaled_angle / 2).unsqueeze(-1)
+        cos_half_angle = torch.cos(scaled_angle / 2).unsqueeze(-1)
+        gaussian_noise_q = torch.cat([cos_half_angle, sin_half_angle * random_axis], dim=-1)
+
+        # Apply the Gaussian noise to noisy_q
+        noisy_q = quaternion_multiply(gaussian_noise_q, noisy_q)
+
+
 
     # Randomly choose the number of noise adding steps between 1 and max_noiseadding_steps
     noiseadding_steps = torch.randint(1, max_noiseadding_steps + 1, (1,)).item()
 
     # Initialize the noisy trajectory as the clean trajectory
     noisy_pos_output = clean_pos.clone()
-    noisy_u_output = clean_u.clone()
-    noisy_theta_output = clean_theta.clone()
+    noisy_q_output = clean_q.clone()
 
     # Linear schedule for noise scale (beta values)
     beta_values = torch.linspace(beta_start, beta_end, noiseadding_steps)  # Linearly spaced beta values
@@ -115,22 +158,16 @@ def add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, 
 
     # Compute the noisy trajectory at timestep t
     noisy_pos_output = torch.sqrt(alpha_bar[t]) * clean_pos + torch.sqrt(1 - alpha_bar[t]) * actual_noise_pos
-    noisy_theta_output = torch.sqrt(alpha_bar[t]) * clean_theta + torch.sqrt(1 - alpha_bar[t]) * actual_noise_theta
-
-    # Compute noisy rotation angle at timestep t
-    noisy_alpha =  torch.sqrt(1 - alpha_bar[t]) * actual_noise_alpha# + torch.sqrt(alpha_bar[t]) * 0 -  cause for clean alpha the angle is 0
     
-    #calculate the noisy_u based on the clean_u and the add noisy_alpha and expand to [64,32,-1]
-    #calculate the prependicular component v to reconstruct the noisy_u
-    v = noisy_u - (torch.sum(clean_u * noisy_u, dim=-1, keepdim=True) * clean_u)
-    v = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-8)  # Normalize v, avoid division by zero
-    # Compute noisy_u_output using rotation formula
-    noisy_u_output = torch.cos(noisy_alpha).unsqueeze(-1) * clean_u + torch.sin(noisy_alpha).unsqueeze(-1) * v
+    #Use Slerp for q and q_0 (both unit quaternions) to calc the output quaternion which is in between with the noise scheduler as t
+    # SLERP(q0, q1, t) = (sin((1-t) * omega) / sin(omega)) * q0 + (sin(t * omega) / sin(omega)) * q1
+    #use alpha_bar as t to interpolate the noisy quaternion output
+    noisy_q_output = slerp(clean_q, noisy_q, torch.sqrt(alpha_bar[t]))
 
     # Noise scale
     noise_scale = 1 / torch.sqrt(alpha_bar[t])
 
-    return noisy_pos_output, noisy_u_output, noisy_alpha, noisy_theta_output, noise_scale
+    return noisy_pos_output, noisy_q_output, noise_scale
 
 
 def calculate_max_noise_factor(beta_start, beta_end, max_noiseadding_steps):
