@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.spatial.transform import Rotation as R
 
+
 def quaternion_inverse(q):
     """Computes the inverse of a unit quaternion q = (w, x, y, z)."""
     q_inv = q.clone()
@@ -25,6 +26,33 @@ def quaternion_multiply(q1, q2):
     z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
 
     return torch.stack((w, x, y, z), dim=-1)
+
+def smooth_quaternions_slerp(q_series, window_size=5, smoothing_factor=0.5):
+    """
+    Smooths a quaternion time series using SLERP interpolation over fixed windows.
+
+    Args:
+        q_series (torch.Tensor): Quaternion time series of shape [T, 4] (T = timesteps).
+        window_size (int): Number of timesteps in each smoothing window.
+        smoothing_factor (float): Weight factor (0.0 = no smoothing, 1.0 = full smoothing).
+
+    Returns:
+        torch.Tensor: Smoothed quaternion time series of shape [T, 4].
+    """
+    smoothed_q = q_series.clone()
+    T = q_series.shape[0]
+
+    for start in range(0, T - window_size + 1, window_size):  # Move in steps of `window_size`
+        end = min(start + window_size, T)  # Ensure last window doesn't go out of bounds
+        window = q_series[start:end]  # Extract the window
+
+        # Smooth within the window using SLERP
+        for t in range(1, len(window) - 1):
+            q_prev = window[t - 1]
+            q_next = window[t + 1]
+            smoothed_q[start + t] = slerp(q_prev, q_next, smoothing_factor)
+
+    return smoothed_q
 
 def slerp(q0, q1, t):
     """Performs Spherical Linear Interpolation (SLERP) between two quaternions."""
@@ -54,6 +82,65 @@ def slerp(q0, q1, t):
     return q_interp
 
 
+# Function to extract rotation axis (u) from a quaternion
+def quaternion_to_axis(q):
+    """
+    Extracts the rotation axis from a unit quaternion.
+
+    Args:
+        q (numpy array): Quaternion array of shape (sequence_length, 4),
+                         where each quaternion is (w, x, y, z).
+
+    Returns:
+        numpy array: Rotation axis (unit vector), shape (sequence_length, 3).
+    """
+    w = q[:, 0]  # Extract w component
+    xyz = q[:, 1:]  # Extract (x, y, z) components
+
+    # Compute sin(theta/2) with numerical stability
+    sin_half_theta = np.sqrt(np.maximum(0.0, 1 - w**2))  # Ensure no negative values
+
+    # Initialize the axis array
+    u = np.zeros_like(xyz)
+
+    # Compute valid indices (where sin(theta/2) is nonzero)
+    valid_mask = sin_half_theta > 1e-6  # Boolean mask of valid elements
+
+    # Normalize only the valid cases
+    u[valid_mask] = xyz[valid_mask] / sin_half_theta[valid_mask, np.newaxis]
+
+    return u
+
+def quaternion_loss(pred_q, target_q, lambda_unit=0.3):
+    """
+    Computes quaternion similarity loss with an additional unit quaternion constraint.
+
+    Args:
+        pred_q (torch.Tensor): Predicted quaternion of shape (..., 4).
+        target_q (torch.Tensor): Ground truth quaternion of shape (..., 4).
+        lambda_unit (float): Weight for unit norm constraint.
+
+    Returns:
+        torch.Tensor: Combined loss value.
+    """
+
+    
+    # Normalize only target_q (ground truth should always be unit-length)
+    target_q = torch.nn.functional.normalize(target_q, dim=-1)
+
+    # Compute geodesic quaternion loss
+    dot_product = torch.sum(pred_q * target_q, dim=-1).abs()  # Compute dot product and take abs
+    loss_q = abs(1 - dot_product)**2  # Quaternion similarity loss
+
+    # Enforce unit norm constraint (L2 loss on norm deviation)
+    unit_loss = torch.mean((torch.norm(pred_q, dim=-1) - 1) ** 2)  # Penalize deviation from unit norm
+
+    #print("loss_q", loss_q)
+    #print("unit_loss", lambda_unit *unit_loss)
+    # Final loss (weighted sum of both)
+    total_loss = loss_q.mean() + lambda_unit * unit_loss
+
+    return total_loss
 
 def loss_function(predicted_noise, actual_noise):
     """

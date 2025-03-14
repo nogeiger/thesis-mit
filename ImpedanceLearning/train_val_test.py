@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
 import random
-from utils import loss_function, add_noise
+from utils import loss_function, quaternion_loss, add_noise, quaternion_inverse, quaternion_multiply, smooth_quaternions_slerp, quaternion_to_axis
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -56,6 +56,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         total_loss = 0
         
         # Use tqdm to create a progress bar
+
         for batch_idx, (pos_0, pos, q_0, q, force, moment) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
             # Move data to device
@@ -80,7 +81,9 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             else:
                 actual_noise_pos = noisy_pos - clean_pos  # Default noise
 
-            #Calc actual noise for q
+            #Calc actual noise for q: actual_noise_q = noisy_q * clean_q^-1
+            # Compute actual noise in quaternion space
+            actual_noise_q = quaternion_multiply(noisy_q, quaternion_inverse(clean_q))
 
             optimizer.zero_grad()
 
@@ -90,11 +93,9 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
-            
-            # Calculate loss and perform backward pass
 
-            #ChANGE LOSS FOR Quaternion (maybe also to have a unit quaternion)
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], ground_truth_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
+
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + 5* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
@@ -178,18 +179,16 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
     # Use tqdm to create a progress bar
     with torch.no_grad():
-        for batch_idx, (pos_0, pos, u_0, u, theta_0, theta, force, moment)in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment)in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
             clean_pos = pos_0.to(device)
             noisy_pos = pos.to(device)
-            clean_u = u_0.to(device)
-            noisy_u = u.to(device)
-            clean_theta = theta_0.to(device)
-            noisy_theta = theta.to(device)
+            clean_q = q_0.to(device)
+            noisy_q = q.to(device)
             force = force.to(device)
             moment = moment.to(device)
 
             # Dynamically add noise
-            noisy_pos, noisy_u, ground_truth_alpha, noisy_theta, noise_scale = add_noise(clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta,
+            noisy_pos, noisy_q, noise_scale = add_noise(clean_pos, noisy_pos, clean_q, noisy_q,
                                         force, moment,
                                         max_noiseadding_steps, beta_start, beta_end, noise_with_force, add_gaussian_noise)
 
@@ -201,16 +200,18 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 actual_noise_pos = noisy_pos - clean_pos  # Default: noise is the diff
 
 
-            actual_noise_theta = noisy_theta - clean_theta
+            #Calc actual noise for q: actual_noise_q = noisy_q * clean_q^-1
+            # Compute actual noise in quaternion space
+            actual_noise_q = quaternion_multiply(noisy_q, quaternion_inverse(clean_q))
 
             # Predict the noise from the noisy pos
             if use_forces:
-                predicted_noise = model(noisy_pos, noisy_u, noisy_theta, force, moment)
+                predicted_noise = model(noisy_pos, noisy_q, force, moment)
             else:
-                predicted_noise = model(noisy_pos, noisy_u, noisy_theta)
+                predicted_noise = model(noisy_pos, noisy_q)
 
             # Calculate loss
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + criterion(predicted_noise[:,:,-2], ground_truth_alpha) + criterion(predicted_noise[:,:,-1], actual_noise_theta.squeeze(-1)) 
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + 5* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -244,114 +245,67 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
     # Initialize lists for mean absolute differences
     mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
-    mean_diffs_u_x, mean_diffs_u_y, mean_diffs_u_z, overall_mean_diffs_u = [], [], [], []
     mean_diffs_theta = []
+    mean_diffs_axis_alpha = []
 
 
     for sample_idx, idx in enumerate(sample_indices):
         # Fetch a **random sample** instead of always using the first batch
-        clean_pos, noisy_pos, clean_u, noisy_u, clean_theta, noisy_theta, force, moment = val_data[idx]
+        clean_pos, noisy_pos, clean_q, noisy_q, force, moment = val_data[idx]
 
         # Move data to the correct device
         clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
         noisy_pos = noisy_pos.unsqueeze(0).to(device)
-        clean_u = clean_u.unsqueeze(0).to(device)
-        noisy_u = noisy_u.unsqueeze(0).to(device)
-        clean_theta = clean_theta.unsqueeze(0).to(device)
-        noisy_theta = noisy_theta.unsqueeze(0).to(device)
+        clean_q = clean_q.unsqueeze(0).to(device)
+        noisy_q = noisy_q.unsqueeze(0).to(device)
         force = force.unsqueeze(0).to(device)
         moment = moment.unsqueeze(0).to(device)
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
-        denoised_u = noisy_u.clone()
-        denoised_theta = noisy_theta.clone()
+        denoised_q = noisy_q.clone()
+
         for _ in range(num_denoising_steps):
-            predicted_noise = model(denoised_pos, denoised_u, denoised_theta, force, moment) if use_forces else model(denoised_pos, denoised_u, denoised_theta)
-
-
+            predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
-            denoised_theta = denoised_theta - predicted_noise[:,:,-1].unsqueeze(-1)
-
-            # Extract the predicted alpha (rotation noise)
-            predicted_alpha = predicted_noise[:, :, -2]  # Shape: [batch, seq_length]
-
-            # Choose a reference vector r that is not parallel to u_noisy
-            r = torch.tensor([1.0, 0.0, 0.0], device=noisy_u.device).expand_as(noisy_u)
-            r = torch.where(torch.abs(noisy_u) < 0.9, r, torch.tensor([0.0, 1.0, 0.0], device=noisy_u.device).expand_as(noisy_u))
-
-            # Compute perpendicular component v
-            v = r - (torch.sum(r * noisy_u, dim=-1, keepdim=True) * noisy_u)
-            v = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-8)  # Normalize v
-
-            # Compute denoised_u using inverse rotation formula
-            denoised_u = torch.cos(predicted_alpha).unsqueeze(-1) * noisy_u - torch.sin(predicted_alpha).unsqueeze(-1) * v
+            denoised_q = quaternion_multiply(noisy_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
 
-
-    
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
         denoised_pos_np = val_dataset.denormalize(denoised_pos.detach().cpu(), "pos_0").numpy()
 
-        noisy_u_np = val_dataset.denormalize(noisy_u.detach().cpu(), "u").numpy()
-        clean_u_np = val_dataset.denormalize(clean_u.detach().cpu(), "u_0").numpy()
-        denoised_u_np = val_dataset.denormalize(denoised_u.detach().cpu(), "u_0").numpy()
-
-        noisy_theta_np = val_dataset.denormalize(noisy_theta.detach().cpu(), "theta").numpy()
-        clean_theta_np = val_dataset.denormalize(clean_theta.detach().cpu(), "theta_0").numpy()
-        denoised_theta_np = val_dataset.denormalize(denoised_theta.detach().cpu(), "theta_0").numpy()
+        noisy_q_np = val_dataset.denormalize(noisy_q.detach().cpu(), "q").numpy()
+        clean_q_np = val_dataset.denormalize(clean_q.detach().cpu(), "q_0").numpy()
+        denoised_q_np = val_dataset.denormalize(denoised_q.detach().cpu(), "q_0").numpy()
 
         force_np = val_dataset.denormalize(force.detach().cpu(), "force").numpy()
         moment_np = val_dataset.denormalize(moment.detach().cpu(), "force").numpy()
 
         if postprocessing == True:
             #Preprocessing of denoise
-            # Compute the offset using the first point difference
-            #offset = clean_pos_np[:, 0, :] - denoised_pos_np[:, 0, :]
-            # Apply the offset to all points in the denoised pos
-            #denoised_pos_np += offset[:, np.newaxis, :]
-
 
             # Apply smoothing using a moving average filter
             window_size = 20  # Adjust the window size based on smoothing needs
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
-            denoised_theta_np = uniform_filter1d(denoised_theta_np, size=window_size, axis=1, mode='nearest')
-            #TO DO: Think about smooting and offset of u
-            #denoised_u_np = uniform_filter1d(denoised_u_np, size=window_size, axis=1, mode='nearest')
+            #smoothing for q using slerp with sliding window
+            denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
 
-
-
+            #remove offses
             # Compute the offset using the average of the first 5 points difference
             offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
-            offset_theta = np.mean(clean_theta_np[:, :1, :] - denoised_theta_np[:, :1, :], axis=1)
-            #remove offset from denoised u
             # Apply the offset to all points in the denoised pos
             denoised_pos_np += offset_pos[:, np.newaxis, :]
-            denoised_theta_np += offset_theta[:, np.newaxis, :]
- 
-            # Apply rotation correction for offset of u_np --> rotation matrix needed for unit vectors
-            # Compute cosine similarity (dot product)
-            cos_alpha_offset = np.sum(clean_u_np[:, 0, :] * denoised_u_np[:, 0, :], axis=-1)
-            cos_alpha_offset = np.clip(cos_alpha_offset, -1.0, 1.0)  # Ensure valid arccos range
+            #for quaternions
+            q_offset = quaternion_multiply(clean_q[:, 0, :], quaternion_inverse(denoised_q[:, 0, :]))
+            # Apply offset correction to the entire sequence
+            for t in range(denoised_q.shape[1]):  # Iterate over timesteps
+                denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
 
-            # Compute the rotation angle
-            alpha_offset = np.arccos(cos_alpha_offset)  # Shape: [batch_size]
+            denoised_q_np = denoised_q
 
-            # Compute perpendicular rotation axis v using cross product
-            v = np.cross(denoised_u_np[:, 0, :], clean_u_np[:, 0, :])
-
-            # Normalize v to unit length
-            v /= np.linalg.norm(v, axis=-1, keepdims=True) + 1e-8  # Avoid division by zero
-
-            # Apply rotation correction to all time steps
-            denoised_u_np = np.cos(alpha_offset)[:, np.newaxis, np.newaxis] * denoised_u_np - np.sin(alpha_offset)[:, np.newaxis, np.newaxis] * v
-
-
-            print("denoised_u", denoised_u)
-            print("clean_u", clean_u_np)
-
+        
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
@@ -359,38 +313,62 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
         overall_mean_diff_pos = np.mean(np.abs(clean_pos_np - denoised_pos_np))
 
-        mean_diff_ux = np.mean(np.abs(clean_u_np[:, :, 0] - denoised_u_np[:, :, 0]))
-        mean_diff_uy = np.mean(np.abs(clean_u_np[:, :, 1] - denoised_u_np[:, :, 1]))
-        mean_diff_uz = np.mean(np.abs(clean_u_np[:, :, 2] - denoised_u_np[:, :, 2]))
-        overall_mean_diff_u = np.mean(np.abs(clean_u_np - denoised_u_np))
-
-        mean_diff_theta = np.mean(np.abs(clean_theta_np - denoised_theta_np))
-
-
         # Append mean differences to lists
         mean_diffs_pos_x.append(mean_diff_x)
         mean_diffs_pos_y.append(mean_diff_y)
         mean_diffs_pos_z.append(mean_diff_z)
         overall_mean_diffs_pos.append(overall_mean_diff_pos)
 
-        mean_diffs_u_x.append(mean_diff_ux)
-        mean_diffs_u_y.append(mean_diff_uy)
-        mean_diffs_u_z.append(mean_diff_uz)
-        overall_mean_diffs_u.append(overall_mean_diff_u)
+        # Compute angular differences theta of quaternions
+        # Ensure quaternions are on CPU and converted to NumPy
+        denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
+        clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
+        # Compute rotation angle theta from quaternions
+        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
+        # Normalize the entire denoised quaternion
+        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True)
+        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
+        # Ensure angles are in degrees first (optional if already in radians)
+        theta_clean_deg = np.degrees(theta_clean)
+        theta_denoised_deg = np.degrees(theta_denoised)
+        # Compute angular difference with wrap-around handling
+        theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
+        # Compute mean error
+        mean_theta_error = np.mean(theta_error)
+        mean_diffs_theta.append(mean_theta_error)
 
-        mean_diffs_theta.append(mean_diff_theta)
+
+
+        # Compute axis-angle representation and loss of alpha for quaternions
+        # Extract rotation axes (u) from quaternions
+        u_clean = quaternion_to_axis(clean_q_np[0,:, :])  # Shape (T, 3)
+        u_denoised = quaternion_to_axis(denoised_q_np[0,:, :])  # Shape (T, 3)
+        # Compute angular difference between axes (for calc of cosine - cosine(theta>1) values leads to instability)
+        dot_product_u = np.einsum('ij,ij->i', u_clean, u_denoised)  # Batch-wise dot product
+        # Fix: Take absolute value to handle u and -u equivalence
+        dot_product_u = np.clip(np.abs(dot_product_u), -1.0, 1.0)  
+
+        # Compute angle difference
+        alpha_error = np.arccos(dot_product_u)  # Angle difference in radians
+
+        # Convert to degrees
+        alpha_error_deg = np.degrees(alpha_error)
+
+        # Compute mean axis error
+        mean_alpha_error = np.mean(alpha_error_deg)
+        mean_diffs_axis_alpha.append(mean_alpha_error) 
 
 
         # Create a separate figure for each sample
         fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
 
         # Plot clean vs denoised pos (Y-axis only) with thicker lines
-        ax_traj.plot(clean_u_np[0, :, 0], label='Clean (ground truth) ux', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) ux', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_u_np[0, :, 1], label='Clean (ground truth) uy', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) uy', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_u_np[0, :, 2], label='Clean (ground truth) uz', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_u_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) uz', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_pos_np[0, :, 0], label='Clean (ground truth) x', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) x', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_pos_np[0, :, 1], label='Clean (ground truth) y', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) y', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_pos_np[0, :, 2], label='Clean (ground truth) z', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) z', linewidth=3.5, color='darkgreen')
 
    
         # Customize plot appearance with bold labels and increased font size
@@ -430,11 +408,8 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         f"Y-axis: {np.mean(mean_diffs_pos_y):.6f}\n"
         f"Z-axis: {np.mean(mean_diffs_pos_z):.6f}\n"
         f"Overall: {np.mean(overall_mean_diffs_pos):.6f}\n\n"
-        f"U_x: {np.mean(mean_diffs_u_x):.6f}\n"
-        f"U_y: {np.mean(mean_diffs_u_y):.6f}\n"
-        f"U_z: {np.mean(mean_diffs_u_z):.6f}\n"
-        f"Overall: {np.mean(overall_mean_diffs_u):.6f}\n\n"
         f"Theta: {np.mean(mean_diffs_theta):.6f}\n"
+        f"Alpha: {np.mean(mean_diffs_axis_alpha):.6f}\n"
     )
 
     # Print results to console
@@ -451,6 +426,8 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     #plt.pause(0.1)
     #input("Press Enter to close all plots and continue...")
     plt.close('all')
+
+  
 
 
 def inference_application(model, application_loader, application_dataset, device, use_forces, save_path, num_sequences=100, num_denoising_steps=1, postprocessing=False):
