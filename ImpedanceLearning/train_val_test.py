@@ -458,6 +458,9 @@ def inference_application(model, application_loader, application_dataset, device
     mean_diffs_theta = []
     mean_diffs_axis_alpha = []
 
+    # Persistent storage for all data
+    all_data = []
+
     for seq_idx in range(num_sequences):
         # Fetch the sequence in order
         clean_pos, noisy_pos, clean_q, noisy_q, force, moment = application_data[seq_idx]
@@ -514,6 +517,27 @@ def inference_application(model, application_loader, application_dataset, device
                 denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
 
             denoised_q_np = denoised_q
+
+
+        # Store in a structured format
+        T = clean_pos_np.shape[1]  # Sequence length
+        time_array = np.arange(T) * 0.005  # Ensure time increments correctly
+
+        for t in range(T):
+            all_data.append([
+                int(seq_idx), float(time_array[t]),
+                *map(float, clean_pos_np[0, t, :]),  # Expands (x, y, z)
+                *map(float, denoised_pos_np[0, t, :]),
+                *map(float, noisy_pos_np[0, t, :]),
+                *map(float, clean_q_np[0, t, :]),  # Expands (w, x, y, z)
+                *map(float, denoised_q_np[0, t, :]),
+                *map(float, noisy_q_np[0, t, :]),
+                *map(float, force_np[0, t, :]),  # Expands (fx, fy, fz)
+                *map(float, moment_np[0, t, :])  # Expands (mx, my, mz)
+            ])
+
+
+
 
 
         # Compute mean absolute differences
@@ -635,3 +659,25 @@ def inference_application(model, application_loader, application_dataset, device
     #plt.pause(0.1)
     #input("Press Enter to close all plots and continue...")
     plt.close('all')
+
+
+        # Convert to DataFrame and save once at the end
+    columns = [
+        "Seq_Index", "Time",
+        "Clean_X", "Clean_Y", "Clean_Z",
+        "Denoised_X", "Denoised_Y", "Denoised_Z",
+        "Noisy_X", "Noisy_Y", "Noisy_Z",
+        "Clean_Q_W", "Clean_Q_X", "Clean_Q_Y", "Clean_Q_Z",
+        "Denoised_Q_W", "Denoised_Q_X", "Denoised_Q_Y", "Denoised_Q_Z",
+        "Noisy_Q_W", "Noisy_Q_X", "Noisy_Q_Y", "Noisy_Q_Z",
+        "Force_X", "Force_Y", "Force_Z",
+        "Moment_X", "Moment_Y", "Moment_Z"
+    ]
+
+    df = pd.DataFrame(all_data, columns=columns)
+    output_file = os.path.join(save_path, "inference_results.txt")
+
+    # Save in tab-separated format
+    df.to_csv(output_file, sep='\t', index=False)
+
+    print(f"Results saved to {output_file}")
