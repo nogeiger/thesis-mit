@@ -133,7 +133,7 @@ def main():
     #criterion = nn.MSELoss()
     #criterion = loss_function_start_point
     criterion=nn.SmoothL1Loss()
-    
+
     # Train and validate
     train_losses, val_loss = train_model_diffusion(
         model,
@@ -197,7 +197,7 @@ def main():
     model.to(device)
     test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=False)
     test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
-
+    
     
     #Inference application
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
@@ -205,7 +205,7 @@ def main():
 
     # Number of sequences to process (adjust as needed)
     num_application_sequences = 100 
-    '''
+    
     # Run inference on application data
     inference_application(
         model,
@@ -219,6 +219,6 @@ def main():
         postprocessing=True  # Set to False if you don't want postprocessing
     )
     
-    '''
+    
 if __name__ == "__main__":
     main()

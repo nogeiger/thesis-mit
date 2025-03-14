@@ -268,7 +268,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         for _ in range(num_denoising_steps):
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
-            denoised_q = quaternion_multiply(noisy_q, quaternion_inverse(predicted_noise[:,:,3:]))
+            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
 
         # Denormalize trajectories
@@ -454,80 +454,184 @@ def inference_application(model, application_loader, application_dataset, device
     num_sequences = min(num_sequences, len(application_data))
     
     # Initialize lists for mean absolute differences
-    mean_diffs_x, mean_diffs_y, mean_diffs_z, overall_mean_diffs = [], [], [], []
+    mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
+    mean_diffs_theta = []
+    mean_diffs_axis_alpha = []
 
     for seq_idx in range(num_sequences):
         # Fetch the sequence in order
-        clean_pos, noisy_pos, force = application_data[seq_idx]
+        clean_pos, noisy_pos, clean_q, noisy_q, force, moment = application_data[seq_idx]
 
         # Move data to the correct device
         clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
         noisy_pos = noisy_pos.unsqueeze(0).to(device)
+        clean_q = clean_q.unsqueeze(0).to(device)
+        noisy_q = noisy_q.unsqueeze(0).to(device)
         force = force.unsqueeze(0).to(device)
+        moment = moment.unsqueeze(0).to(device)
+
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
+        denoised_q = noisy_q.clone()
         for _ in range(num_denoising_steps):
-            predicted_noise = model(denoised_pos, force) if use_forces else model(denoised_pos)
-            denoised_pos = denoised_pos - predicted_noise  # Remove noise iteratively
+            predicted_noise = model(denoised_pos, denoised_q ,force, moment) if use_forces else model(denoised_pos, denoised_q)
+            denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
+            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
+
+
 
         # Denormalize trajectories
         noisy_pos_np = application_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = application_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
         denoised_pos_np = application_dataset.denormalize(denoised_pos.detach().cpu(), "pos_0").numpy()
+
+        noisy_q_np = application_dataset.denormalize(noisy_q.detach().cpu(), "q").numpy()
+        clean_q_np = application_dataset.denormalize(clean_q.detach().cpu(), "q_0").numpy()
+        denoised_q_np = application_dataset.denormalize(denoised_q.detach().cpu(), "q_0").numpy()
+
+        force_np = application_dataset.denormalize(force.detach().cpu(), "force").numpy()
+        moment_np = application_dataset.denormalize(moment.detach().cpu(), "force").numpy()
         
-        if postprocessing:
+        if postprocessing == True:
+            #Preprocessing of denoise
+
             # Apply smoothing using a moving average filter
-            window_size = 20
+            window_size = 20  # Adjust the window size based on smoothing needs
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
-            
+            #smoothing for q using slerp with sliding window
+            denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
+
+            #remove offses
             # Compute the offset using the average of the first 5 points difference
-            offset = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
-            denoised_pos_np += offset[:, np.newaxis, :]
+            offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
+            # Apply the offset to all points in the denoised pos
+            denoised_pos_np += offset_pos[:, np.newaxis, :]
+            #for quaternions
+            q_offset = quaternion_multiply(clean_q[:, 0, :], quaternion_inverse(denoised_q[:, 0, :]))
+            # Apply offset correction to the entire sequence
+            for t in range(denoised_q.shape[1]):  # Iterate over timesteps
+                denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
+
+            denoised_q_np = denoised_q
+
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
         mean_diff_y = np.mean(np.abs(clean_pos_np[:, :, 1] - denoised_pos_np[:, :, 1]))
         mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
-        overall_mean_diff = np.mean(np.abs(clean_pos_np - denoised_pos_np))
+        overall_mean_diff_pos = np.mean(np.abs(clean_pos_np - denoised_pos_np))
 
-        mean_diffs_x.append(mean_diff_x)
-        mean_diffs_y.append(mean_diff_y)
-        mean_diffs_z.append(mean_diff_z)
-        overall_mean_diffs.append(overall_mean_diff)
+        # Append mean differences to lists
+        mean_diffs_pos_x.append(mean_diff_x)
+        mean_diffs_pos_y.append(mean_diff_y)
+        mean_diffs_pos_z.append(mean_diff_z)
+        overall_mean_diffs_pos.append(overall_mean_diff_pos)
 
-        # Save plot for each sequence
-        fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))
-        ax_traj.plot(clean_pos_np[0, :, 1], label='Clean (ground truth)', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_pos_np[0, :, 1], linestyle='--', label='Denoised (diffusion model)', linewidth=3.5, color='darkgreen')
-        
+        # Compute angular differences theta of quaternions
+        # Ensure quaternions are on CPU and converted to NumPy
+        denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
+        clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
+        # Compute rotation angle theta from quaternions
+        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
+        # Normalize the entire denoised quaternion
+        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True)
+        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
+        # Ensure angles are in degrees first (optional if already in radians)
+        theta_clean_deg = np.degrees(theta_clean)
+        theta_denoised_deg = np.degrees(theta_denoised)
+        # Compute angular difference with wrap-around handling
+        theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
+        # Compute mean error
+        mean_theta_error = np.mean(theta_error)
+        mean_diffs_theta.append(mean_theta_error)
+
+        # Compute axis-angle representation and loss of alpha for quaternions
+        # Extract rotation axes (u) from quaternions
+        u_clean = quaternion_to_axis(clean_q_np[0,:, :])  # Shape (T, 3)
+        u_denoised = quaternion_to_axis(denoised_q_np[0,:, :])  # Shape (T, 3)
+        # Compute angular difference between axes (for calc of cosine - cosine(theta>1) values leads to instability)
+        dot_product_u = np.einsum('ij,ij->i', u_clean, u_denoised)  # Batch-wise dot product
+        # Fix: Take absolute value to handle u and -u equivalence
+        dot_product_u = np.clip(np.abs(dot_product_u), -1.0, 1.0)  
+
+        # Compute angle difference
+        alpha_error = np.arccos(dot_product_u)  # Angle difference in radians
+
+        # Convert to degrees
+        alpha_error_deg = np.degrees(alpha_error)
+
+        # Compute mean axis error
+        mean_alpha_error = np.mean(alpha_error_deg)
+        mean_diffs_axis_alpha.append(mean_alpha_error) 
+
+
+
+
+        # Create a separate figure for each sample
+        fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
+
+        # Plot clean vs denoised pos (Y-axis only) with thicker lines
+        ax_traj.plot(clean_pos_np[0, :, 0], label='Clean (ground truth) x', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) x', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_pos_np[0, :, 1], label='Clean (ground truth) y', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) y', linewidth=3.5, color='darkgreen')
+        ax_traj.plot(clean_pos_np[0, :, 2], label='Clean (ground truth) z', linewidth=3.5, color='darkblue')
+        ax_traj.plot(denoised_pos_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) z', linewidth=3.5, color='darkgreen')
+
+   
+        # Customize plot appearance with bold labels and increased font size
         ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
-        ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')
-        ax_traj.set_title(f'Clean vs Denoised pos in Y-direction - Seq {seq_idx+1}', fontsize=18, fontweight='bold')
+        ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')  # Y-label with tilde notation
+        ax_traj.set_title(f'Clean vs denoised zero force pos in y-direction - Sample {seq_idx+1}', 
+                        fontsize=18, fontweight='bold')
+
         ax_traj.legend(fontsize=14)
+
+        # Make grid lines more visible
         ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
+
+        # Increase tick label size and make ticks thicker
         ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
-        
-        plot_filename = os.path.join(save_path, f"application_pos_seq_{seq_idx+1}.png")
+
+        # Define save path for the plot
+        plot_filename = os.path.join(save_path, f"pos_sample_{seq_idx+1}.png")
+
+        # Save the figure
         plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+
+        # Show plots without blocking execution
+        #plt.show(block=False)
+
+        # Close the figure to free memory
         plt.close(fig)
 
-    # Print Mean Absolute Differences
-    print(f"\nMean Absolute Differences Across {num_sequences} Sequences:")
-    print(f"X-axis: {np.mean(mean_diffs_x):.6f}")
-    print(f"Y-axis: {np.mean(mean_diffs_y):.6f}")
-    print(f"Z-axis: {np.mean(mean_diffs_z):.6f}")
-    print(f"Overall: {np.mean(overall_mean_diffs):.6f}")
+
+    # Define the path for the results file
+    results_file = os.path.join(save_path, "test_results.txt")
+
+    # Prepare the results text
+    results_text = (
+        f"\nMean Absolute Differences Across Samples:\n"
+        f"X-axis: {np.mean(mean_diffs_pos_x):.6f}\n"
+        f"Y-axis: {np.mean(mean_diffs_pos_y):.6f}\n"
+        f"Z-axis: {np.mean(mean_diffs_pos_z):.6f}\n"
+        f"Overall: {np.mean(overall_mean_diffs_pos):.6f}\n\n"
+        f"Theta: {np.mean(mean_diffs_theta):.6f}\n"
+        f"Alpha: {np.mean(mean_diffs_axis_alpha):.6f}\n"
+    )
+
+    # Print results to console
+    print(results_text)
 
     # Save results to file
-    results_file = os.path.join(save_path, "application_results.txt")
-    results_text = (
-        f"\nMean Absolute Differences Across {num_sequences} Sequences:\n"
-        f"X-axis: {np.mean(mean_diffs_x):.6f}\n"
-        f"Y-axis: {np.mean(mean_diffs_y):.6f}\n"
-        f"Z-axis: {np.mean(mean_diffs_z):.6f}\n"
-        f"Overall: {np.mean(overall_mean_diffs):.6f}\n"
-    )
     with open(results_file, "w") as file:
         file.write(results_text)
-    print(f"Application inference results saved to {results_file}")
+
+    print(f"Test results saved to {results_file}")
+
+
+    # Keep plots open until the user closes them
+    #plt.pause(0.1)
+    #input("Press Enter to close all plots and continue...")
+    plt.close('all')
