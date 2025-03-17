@@ -9,6 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from utils import loss_function, quaternion_loss, add_noise, quaternion_inverse, quaternion_multiply, smooth_quaternions_slerp, quaternion_to_axis
+from stiffness_est import estimate_stiffness_per_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -590,6 +591,15 @@ def inference_application(model, application_loader, application_dataset, device
         # Compute mean axis error
         mean_alpha_error = np.mean(alpha_error_deg)
         mean_diffs_axis_alpha.append(mean_alpha_error) 
+
+        # Estimate stiffness per sequence using NLS
+        k_t_estimated, k_r_estimated = estimate_stiffness_per_sequence(
+            force_np, moment_np, clean_pos_np, denoised_pos_np, clean_q_np, denoised_q_np, time_array
+        )
+
+        # Print the results for debugging (optional)
+        print(f"Estimated Translational Stiffness: {k_t_estimated}")
+        print(f"Estimated Rotational Stiffness: {k_r_estimated}")
 
 
 
