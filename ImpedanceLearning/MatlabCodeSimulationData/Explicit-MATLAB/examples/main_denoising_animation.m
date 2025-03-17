@@ -113,9 +113,9 @@ end
 close(v);
 
 % Labels
-xlabel('$\mathbf{\xi}^1$', 'Interpreter', 'latex', 'FontSize', 16);
-ylabel('$\mathbf{\xi}^2$', 'Interpreter', 'latex', 'FontSize', 16);
-zlabel('U($\mathbf{\xi}^1, \mathbf{\xi}^2$)', 'Interpreter', 'latex', 'FontSize', 16);
+xlabel('$x^1$', 'Interpreter', 'latex', 'FontSize', 16);
+ylabel('$x^2$', 'Interpreter', 'latex', 'FontSize', 16);
+zlabel('U($x^1, x^2$)', 'Interpreter', 'latex', 'FontSize', 16);
 
 % Adjust view
 view([-55, 50]);
