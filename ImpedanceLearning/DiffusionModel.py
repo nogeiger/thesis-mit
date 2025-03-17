@@ -35,7 +35,7 @@ def main():
     beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    early_stop_patience = 75 #for early stopping
+    early_stop_patience = 50 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
     timestamp = datetime.now().strftime("%Y-%"
