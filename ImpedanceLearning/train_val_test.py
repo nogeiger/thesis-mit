@@ -45,7 +45,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
 
 
     # Initialize ReduceLROnPlateau
-    lr_scheduler_patience = max(5, int(early_stop_patience * 0.32))  # Reduce LR after 1/3 of early stopping patience
+    lr_scheduler_patience = min(5, int(early_stop_patience * 0.32))  # Reduce LR after 1/3 of early stopping patience
     #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=lr_scheduler_patience, verbose=True)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=True)
 
@@ -95,9 +95,12 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
                 predicted_noise = model(noisy_pos, noisy_q)
 
 
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + 5* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  10* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
+            #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000  # Normalize loss by noise scale
             loss.backward()
+
 
             # Apply gradient clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -211,8 +214,8 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_q)
 
             # Calculate loss
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) + 5* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  10 *quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000
             total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)
@@ -265,12 +268,18 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         denoised_pos = noisy_pos.clone()
         denoised_q = noisy_q.clone()
 
-        for _ in range(num_denoising_steps):
+        for i in range(num_denoising_steps):
+
+        
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
-
-
+            #print(f"predicted_noise: {predicted_noise}")
+            #print(f"predicted_noise: {predicted_noise}")
+            #print(f"inverse q: {quaternion_inverse(predicted_noise[:,:,3:])}")
+            #print(f"denoised_q: {denoised_q}")
+            #print(f"initial q: {noisy_q}")
+    
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -304,6 +313,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
                 denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
 
             denoised_q_np = denoised_q
+
 
         
 
@@ -519,7 +529,7 @@ def inference_application(model, application_loader, application_dataset, device
             denoised_q_np = denoised_q
 
 
-        # Store in a structured format
+        # Store all data in a structured format for txt file for matlab/robot
         T = clean_pos_np.shape[1]  # Sequence length
         time_array = np.arange(T) * 0.005  # Ensure time increments correctly
 
@@ -535,10 +545,6 @@ def inference_application(model, application_loader, application_dataset, device
                 *map(float, force_np[0, t, :]),  # Expands (fx, fy, fz)
                 *map(float, moment_np[0, t, :])  # Expands (mx, my, mz)
             ])
-
-
-
-
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))

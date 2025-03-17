@@ -7,12 +7,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.spatial.transform import Rotation as R
-
+import torch.nn.functional as F
 
 def quaternion_inverse(q):
-    """Computes the inverse of a unit quaternion q = (w, x, y, z)."""
-    q_inv = q.clone()
-    q_inv[..., 1:] *= -1  # Negate x, y, z components
+    """Computes the inverse of a quaternion q = (w, x, y, z)."""
+    norm_sq = torch.sum(q**2, dim=-1, keepdim=True)  # Compute |q|^2
+    q_conjugate = q.clone()
+    q_conjugate[..., 1:] *= -1  # Negate x, y, z components
+    
+    q_inv = q_conjugate / norm_sq  # Normalize by |q|^2
     return q_inv
 
 def quaternion_multiply(q1, q2):
@@ -113,32 +116,63 @@ def quaternion_to_axis(q):
 
 def quaternion_loss(pred_q, target_q, lambda_unit=0.3):
     """
-    Computes quaternion similarity loss with an additional unit quaternion constraint.
+    Computes quaternion loss with geodesic distance, theta difference (angle wrap-around fixed), and alpha loss (stable).
 
     Args:
-        pred_q (torch.Tensor): Predicted quaternion of shape (..., 4).
-        target_q (torch.Tensor): Ground truth quaternion of shape (..., 4).
+        pred_q (torch.Tensor): Predicted quaternion (..., 4).
+        target_q (torch.Tensor): Ground truth quaternion (..., 4).
         lambda_unit (float): Weight for unit norm constraint.
+        lambda_theta (float): Weight for theta (rotation angle) difference.
+        lambda_alpha (float): Weight for axis alignment difference.
 
     Returns:
         torch.Tensor: Combined loss value.
     """
 
-    
-    # Normalize only target_q (ground truth should always be unit-length)
-    target_q = torch.nn.functional.normalize(target_q, dim=-1)
+    # Normalize target quaternion (ground truth should always be unit-length)
+    target_q = F.normalize(target_q, dim=-1)
 
-    # Compute geodesic quaternion loss
-    dot_product = torch.sum(pred_q * target_q, dim=-1).abs()  # Compute dot product and take abs
-    loss_q = abs(1 - dot_product)**2  # Quaternion similarity loss
+    # Normalize predicted quaternion (to avoid numerical instability)
+    pred_q = F.normalize(pred_q, dim=-1)
 
-    # Enforce unit norm constraint (L2 loss on norm deviation)
-    unit_loss = torch.mean((torch.norm(pred_q, dim=-1) - 1) ** 2)  # Penalize deviation from unit norm
+    # Ensure correct quaternion orientation (avoid -q vs. q issue)
+    dot_product = torch.sum(pred_q * target_q, dim=-1)
+    pred_q = torch.where(dot_product.unsqueeze(-1) < 0, -pred_q, pred_q)  # Flip if necessary
+    dot_product = dot_product.abs()  # Ensure positive dot product
 
-    #print("loss_q", loss_q)
-    #print("unit_loss", lambda_unit *unit_loss)
-    # Final loss (weighted sum of both)
-    total_loss = loss_q.mean() + lambda_unit * unit_loss
+    # 1. Geodesic quaternion loss
+    loss_q = (1 - dot_product) ** 2  # Quaternion similarity loss
+
+    # 2. Theta (rotation angle) difference loss (fixed wrap-around)
+    theta_pred = 2 * torch.acos(torch.clamp(pred_q[..., 0], -1.0, 1.0))  # Extract rotation angle
+    theta_target = 2 * torch.acos(torch.clamp(target_q[..., 0], -1.0, 1.0))
+
+    # Fix for angle wrap-around (1° is close to 359°)
+    theta_diff = torch.abs(theta_pred - theta_target)
+    theta_error = torch.minimum(theta_diff, 2 * torch.pi - theta_diff)  # Corrects wrap-around
+    loss_theta = torch.mean(theta_error ** 2)  # Squared error for smooth training
+
+    # **3. Alpha (axis difference) loss - FIXED NaN Issues!**
+    axis_pred = F.normalize(pred_q[..., 1:], dim=-1)  # Extract unit axis (x, y, z)
+    eps=1e-8
+    axis_target = F.normalize(target_q[..., 1:], dim=-1)
+
+    dot_product_axis = torch.sum(axis_pred * axis_target, dim=-1)
+
+    # **Avoid numerical instability in arctan2 by clamping more aggressively**
+    dot_product_axis = torch.clamp(dot_product_axis, -0.999999, 0.999999)
+
+    # **Prevent sqrt(negative value) by adding epsilon**
+    alpha_error = torch.atan2(torch.sqrt(torch.clamp(1 - dot_product_axis**2, min=0.0) + eps), dot_product_axis)
+
+    loss_alpha = torch.mean(alpha_error ** 2)
+
+    # 4. Unit norm constraint
+    unit_loss = torch.mean((torch.norm(pred_q, dim=-1) - 1) ** 2)
+
+    #print(f"Loss_q: {loss_q.mean().item():.4f}, Loss_theta: {loss_theta.item():.4f}, Loss_alpha: {loss_alpha.item():.4f}, Unit loss: {unit_loss.item():.4f}")
+    # Final loss (weighted sum)
+    total_loss = loss_q.mean() +  loss_theta + lambda_unit * unit_loss + 10 *loss_alpha # Combine all losses
 
     return total_loss
 

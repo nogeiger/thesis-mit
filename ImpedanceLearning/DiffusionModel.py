@@ -19,11 +19,11 @@ def main():
     """ 
     
     # Definition of parameters
-    seq_length = 32 #seq len of data
+    seq_length = 16 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 1024#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
+    hidden_dim = 2048#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 1#500#500 #number of epochs
+    num_epochs = 500#00 #number of epochs
     learning_rate = 1e-3 #learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -38,7 +38,8 @@ def main():
     early_stop_patience = 75 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now().strftime("%Y-%"
+    "m-%d_%H-%M-%S")
 
     hyperparams = {
     "seq_length": seq_length,
@@ -108,8 +109,6 @@ def main():
     model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
-
-
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
