@@ -14,6 +14,7 @@ from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import logging
 from datetime import datetime
+from scipy.ndimage import uniform_filter1d
 
 
 
@@ -269,16 +270,11 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         denoised_q = noisy_q.clone()
 
         for i in range(num_denoising_steps):
-
-        
+      
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
-            #print(f"predicted_noise: {predicted_noise}")
-            #print(f"predicted_noise: {predicted_noise}")
-            #print(f"inverse q: {quaternion_inverse(predicted_noise[:,:,3:])}")
-            #print(f"denoised_q: {denoised_q}")
-            #print(f"initial q: {noisy_q}")
+
     
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
