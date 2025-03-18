@@ -141,7 +141,7 @@ def quaternion_loss(pred_q, target_q, lambda_unit=0.3):
     unit_loss = torch.mean((torch.norm(pred_q, dim=-1) - 1) ** 2)
 
     # Final weighted loss
-    return loss_q + 2* loss_theta + lambda_unit * unit_loss + 10 * loss_alpha
+    return loss_q + 1* loss_theta + lambda_unit * unit_loss + 10 * loss_alpha
 
   
 

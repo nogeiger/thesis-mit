@@ -464,6 +464,10 @@ def inference_application(model, application_loader, application_dataset, device
     mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
     mean_diffs_theta = []
     mean_diffs_axis_alpha = []
+    #mean for stiffness
+    mean_diffs_k_t = []
+    mean_diffs_k_r = []
+
 
     # Persistent storage for all data
     all_data = []
@@ -548,6 +552,13 @@ def inference_application(model, application_loader, application_dataset, device
         k_r_estimated_gt_repeated = np.full((T, 1), k_r_estimated_gt)  # Shape (T, 1)
         k_t_estimated_repeated = np.full((T, 1), k_t_estimated)  # Shape (T, 1)
         k_r_estimated_repeated = np.full((T, 1), k_r_estimated)  # Shape (T, 1)
+
+        mean_diff_k_t = np.abs(k_t_estimated_gt - k_t_estimated)
+        mean_diff_k_r = np.abs(k_r_estimated_gt - k_r_estimated)
+
+        mean_diffs_k_t.append(mean_diff_k_t)
+        mean_diffs_k_r.append(mean_diff_k_r)
+
 
         # Print the results for debugging (optional)
         print(f"Stiffness in sequence {seq_idx + 1}")
@@ -677,6 +688,8 @@ def inference_application(model, application_loader, application_dataset, device
         f"Overall: {np.mean(overall_mean_diffs_pos):.6f}\n\n"
         f"Theta: {np.mean(mean_diffs_theta):.6f}\n"
         f"Alpha: {np.mean(mean_diffs_axis_alpha):.6f}\n"
+        f"Mean Stiffness Translational: {np.mean(mean_diffs_k_t):.6f}\n"
+        f"Mean Stiffness Rotational: {np.mean(mean_diffs_k_r):.6f}\n"
     )
 
     # Print results to console
