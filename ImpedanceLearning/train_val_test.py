@@ -467,6 +467,8 @@ def inference_application(model, application_loader, application_dataset, device
     #mean for stiffness
     mean_diffs_k_t = []
     mean_diffs_k_r = []
+    gt_k_t_values = []
+    gt_k_r_values = []
 
 
     # Persistent storage for all data
@@ -558,6 +560,11 @@ def inference_application(model, application_loader, application_dataset, device
 
         mean_diffs_k_t.append(mean_diff_k_t)
         mean_diffs_k_r.append(mean_diff_k_r)
+
+        # Store ground truth stiffness values
+        gt_k_t_values.append(k_t_estimated_gt)
+        gt_k_r_values.append(k_r_estimated_gt)
+
 
 
         # Print the results for debugging (optional)
@@ -676,6 +683,19 @@ def inference_application(model, application_loader, application_dataset, device
         plt.close(fig)
 
 
+
+    # Compute mean absolute error
+    mean_k_t_error = np.mean(mean_diffs_k_t)
+    mean_k_r_error = np.mean(mean_diffs_k_r)
+
+    # Compute average ground truth stiffness
+    avg_gt_k_t = np.mean(gt_k_t_values)
+    avg_gt_k_r = np.mean(gt_k_r_values)
+
+    # Compute percentage errors
+    percent_error_k_t = (mean_k_t_error / avg_gt_k_t) * 100 if avg_gt_k_t != 0 else 0
+    percent_error_k_r = (mean_k_r_error / avg_gt_k_r) * 100 if avg_gt_k_r != 0 else 0
+
     # Define the path for the results file
     results_file = os.path.join(save_path, "test_results.txt")
 
@@ -690,6 +710,9 @@ def inference_application(model, application_loader, application_dataset, device
         f"Alpha: {np.mean(mean_diffs_axis_alpha):.6f}\n"
         f"Mean Stiffness Translational: {np.mean(mean_diffs_k_t):.6f}\n"
         f"Mean Stiffness Rotational: {np.mean(mean_diffs_k_r):.6f}\n"
+        f"Mean Translational Stiffness Error: {mean_k_t_error:.6f} (Percentage: {percent_error_k_t:.2f}%)\n"
+        f"Mean Rotational Stiffness Error: {mean_k_r_error:.6f} (Percentage: {percent_error_k_r:.2f}%)\n"
+
     )
 
     # Print results to console
