@@ -100,7 +100,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
             #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
-            loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000  # Normalize loss by noise scale
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
 
@@ -217,7 +217,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
             # Calculate loss
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-            loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000
+            loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)

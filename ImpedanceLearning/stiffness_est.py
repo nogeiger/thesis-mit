@@ -41,7 +41,7 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
     force_np = to_numpy(force_np).squeeze(0)
     moment_np = to_numpy(moment_np).squeeze(0)
 
-    ### 1. Compute Displacement (Δp) and Velocity (ẋ)
+    # 1) Compute Displacement (Δp) and Velocity (ẋ)
     delta_p = zero_force_pos_np - observed_pos_np  # Position displacement
 
     # Ensure correct time_array length
@@ -53,13 +53,13 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
 
     velocity = np.gradient(observed_pos_np, time_array, axis=0)  # Velocity estimate
 
-    ### 2. Compute Rotation Axis (u₀) and Angle (θ)
+    # 2) Compute Rotation Axis (u₀) and Angle (θ)
     # Ensure u_0 is on CPU before converting to NumPy
     u_0 = zero_force_q_np[:, 1:]  # Extract vector part of quaternion (x, y, z)
     u_0 = u_0 / np.linalg.norm(u_0, axis=1, keepdims=True)  # Normalize
     theta = 2 * np.arccos(np.clip(zero_force_q_np[:, 0], -1.0, 1.0))  # Rotation angle
 
-    ### 3. Define Residual Functions for NLS
+    # 3) Define Residual Functions for NLS
 
     def translation_residuals(k_t):
         """ Residual function for translational stiffness. """
@@ -73,7 +73,7 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         predicted_moment = np.diag(k_r) @ (u_0.T * theta - alpha_r * moment_np.T)
         return (moment_np.T - predicted_moment).flatten()
 
-    ### 4. Solve for Stiffness using NLS
+    # 4) Solve for Stiffness using NLS
 
     # Initial guess for stiffness
     k_t_init = np.array([650, 650, 650])  # Initial guess for translation stiffness

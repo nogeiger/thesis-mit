@@ -21,10 +21,10 @@ def main():
     # Definition of parameters
     seq_length = 16 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 2048#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
+    hidden_dim = 1024#2048 FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
     num_epochs = 500#00#500#00 #number of epochs
-    learning_rate = 1e-3 #learning rate
+    learning_rate = 1e-4 #1e-3 FF#learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
@@ -35,7 +35,7 @@ def main():
     beta_end = 0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    early_stop_patience = 25 #for early stopping
+    early_stop_patience = 75 #for early stopping
     save_interval = 20
     save_path = "save_checkpoints"
     timestamp = datetime.now().strftime("%Y-%"
@@ -197,10 +197,10 @@ def main():
     model.to(device)
     print("_____________________________________________")
     print("-----Test model without postprocessing-----")
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=False)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=False)
     print("_____________________________________________")
     print("-----Test model with postprocessing-----")
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=50, postprocessing=True)
+    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=True)
     
     
     #Inference application
@@ -208,7 +208,7 @@ def main():
     os.makedirs(save_path_application, exist_ok=True)
 
     # Number of sequences to process (adjust as needed)
-    num_application_sequences = 10
+    num_application_sequences = 100
     print("_____________________________________________")
     print("-----Inference on application data-----")
     # Run inference on application data
