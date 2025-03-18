@@ -77,10 +77,10 @@ class NoisePredictorTransformer(nn.Module):
     def __init__(self, seq_length, hidden_dim, num_heads=8, num_layers=4, use_forces=False):
         super(NoisePredictorTransformer, self).__init__()
         self.use_forces = use_forces
-        input_dim = 3  # (x, y, z)
+        input_dim = 7  # (x, y, z)
 
         if self.use_forces:
-            input_dim += 3  # Include force dimensions (fx, fy, fz)
+            input_dim += 6  # Include force dimensions (fx, fy, fz)
 
         self.embedding = nn.Linear(input_dim, hidden_dim)  # Embed trajectory + forces into hidden_dim
         self.positional_encoding = nn.Parameter(torch.zeros(1, seq_length, hidden_dim))  # Learnable positional encodings
@@ -92,26 +92,26 @@ class NoisePredictorTransformer(nn.Module):
         # Fully connected output layers
         self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim // 2, 3)  # Output clean trajectory (x, y, z)
+        self.fc2 = nn.Linear(hidden_dim // 2, 7)  # Output clean trajectory (x, y, z)
 
-    def forward(self, noisy_trajectory, forces=None):
+    def forward(self, noisy_pos, noisy_q, forces=None, moment=None):
         """
         Forward pass to predict clean 3D trajectory.
 
         Args:
-            noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 3].
-            forces (torch.Tensor, optional): Input forces of shape [batch_size, seq_length, 3].
+            noisy_trajectory (torch.Tensor): Input noisy trajectory of shape [batch_size, seq_length, 7].
+            forces (torch.Tensor, optional): Input forces of shape [batch_size, seq_length, 7].
 
         Returns:
-            torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 3].
+            torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 7].
         """
-        batch_size, seq_length, _ = noisy_trajectory.shape
+        batch_size, seq_length, _ = noisy_pos.shape
 
         # Concatenate forces with trajectory if used
         if self.use_forces:
-            x = torch.cat((noisy_trajectory, forces), dim=-1)  # Shape: [batch_size, seq_length, 6]
+            x = torch.cat((noisy_pos, noisy_q, forces, moment), dim=-1)  # Shape: [batch_size, seq_length, 13]
         else:
-            x = noisy_trajectory  # Shape: [batch_size, seq_length, 3]
+            x = torch.cat(noisy_pos, noisy_q)  # Shape: [batch_size, seq_length, 7]
 
         # Embed input and add positional encoding
         x = self.embedding(x) + self.positional_encoding  # Shape: [batch_size, seq_length, hidden_dim]
@@ -122,7 +122,7 @@ class NoisePredictorTransformer(nn.Module):
         # Decode to output clean trajectory
         x = self.fc1(x)
         x = self.relu(x)
-        predicted_trajectory = self.fc2(x)  # Shape: [batch_size, seq_length, 3]
+        predicted_trajectory = self.fc2(x)  # Shape: [batch_size, seq_length, 7]
 
         return predicted_trajectory
 

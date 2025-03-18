@@ -333,7 +333,8 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         # Compute rotation angle theta from quaternions
         theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
         # Normalize the entire denoised quaternion
-        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True)
+        epsilon = 1e-8  # Small value to avoid division by zero
+        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True) + epsilon
         theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
         # Ensure angles are in degrees first (optional if already in radians)
         theta_clean_deg = np.degrees(theta_clean)

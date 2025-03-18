@@ -105,9 +105,9 @@ def main():
     
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_name = "FF"
-    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
-    #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model_name = "Transformer"
+    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
