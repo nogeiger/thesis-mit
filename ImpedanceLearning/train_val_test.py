@@ -97,7 +97,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
                 predicted_noise = model(noisy_pos, noisy_q)
 
 
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  10* quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
             #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000  # Normalize loss by noise scale
@@ -216,7 +216,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_q)
 
             # Calculate loss
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  10 *quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 1000
             total_loss += loss.item()
 
@@ -490,7 +490,6 @@ def inference_application(model, application_loader, application_dataset, device
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
 
-
         # Denormalize trajectories
         noisy_pos_np = application_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = application_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -526,9 +525,37 @@ def inference_application(model, application_loader, application_dataset, device
             denoised_q_np = denoised_q
 
 
+
         # Store all data in a structured format for txt file for matlab/robot
         T = clean_pos_np.shape[1]  # Sequence length
         time_array = np.arange(T) * 0.005  # Ensure time increments correctly
+
+
+
+        #Estimate stiffness per sequence
+        # Estimate stiffness per sequence using NLS with ground truth data only
+        k_t_estimated_gt, k_r_estimated_gt = estimate_stiffness_per_sequence(
+             force_np, moment_np, clean_pos_np, noisy_pos_np, clean_q_np, noisy_q_np, time_array
+        )
+
+        # Estimate stiffness per sequence using NLS
+        k_t_estimated, k_r_estimated = estimate_stiffness_per_sequence(
+            force_np, moment_np, denoised_pos_np, noisy_pos_np, denoised_q_np, noisy_q_np, time_array
+        )
+
+        # Repeat estimated and ground truth stiffness values for all timesteps in the sequence
+        k_t_estimated_gt_repeated = np.full((T, 1), k_t_estimated_gt)  # Shape (T, 1)
+        k_r_estimated_gt_repeated = np.full((T, 1), k_r_estimated_gt)  # Shape (T, 1)
+        k_t_estimated_repeated = np.full((T, 1), k_t_estimated)  # Shape (T, 1)
+        k_r_estimated_repeated = np.full((T, 1), k_r_estimated)  # Shape (T, 1)
+
+        # Print the results for debugging (optional)
+        print(f"Stiffness in sequence {seq_idx + 1}")
+        print(f"Ground truth Translational Stiffness: {k_t_estimated_gt}, Estimated Translational Stiffness: {k_t_estimated}")
+        print(f"Ground truth Rotational Stiffness: {k_r_estimated_gt}, Estimated Rotational Stiffness: {k_r_estimated}")
+        print("______________________")
+
+
 
         for t in range(T):
             all_data.append([
@@ -540,7 +567,12 @@ def inference_application(model, application_loader, application_dataset, device
                 *map(float, denoised_q_np[0, t, :]),
                 *map(float, noisy_q_np[0, t, :]),
                 *map(float, force_np[0, t, :]),  # Expands (fx, fy, fz)
-                *map(float, moment_np[0, t, :])  # Expands (mx, my, mz)
+                *map(float, moment_np[0, t, :]),  # Expands (mx, my, mz)
+                *map(float, k_t_estimated_gt_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
+                *map(float, k_r_estimated_gt_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
+                *map(float, k_t_estimated_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
+                *map(float, k_r_estimated_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
+
             ])
 
         # Compute mean absolute differences
@@ -591,16 +623,6 @@ def inference_application(model, application_loader, application_dataset, device
         # Compute mean axis error
         mean_alpha_error = np.mean(alpha_error_deg)
         mean_diffs_axis_alpha.append(mean_alpha_error) 
-
-        # Estimate stiffness per sequence using NLS
-        k_t_estimated, k_r_estimated = estimate_stiffness_per_sequence(
-            force_np, moment_np, clean_pos_np, denoised_pos_np, clean_q_np, denoised_q_np, time_array
-        )
-
-        # Print the results for debugging (optional)
-        print(f"Estimated Translational Stiffness: {k_t_estimated}")
-        print(f"Estimated Rotational Stiffness: {k_r_estimated}")
-
 
 
 
@@ -683,7 +705,9 @@ def inference_application(model, application_loader, application_dataset, device
         "Denoised_Q_W", "Denoised_Q_X", "Denoised_Q_Y", "Denoised_Q_Z",
         "Noisy_Q_W", "Noisy_Q_X", "Noisy_Q_Y", "Noisy_Q_Z",
         "Force_X", "Force_Y", "Force_Z",
-        "Moment_X", "Moment_Y", "Moment_Z"
+        "Moment_X", "Moment_Y", "Moment_Z",
+        "GT_Stiffness_T","GT_Stiffness_R",
+        "Estimated_Stiffness_T", "Estimated_Stiffness_R",
     ]
 
     df = pd.DataFrame(all_data, columns=columns)
