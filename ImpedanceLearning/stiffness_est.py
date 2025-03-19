@@ -29,7 +29,7 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         D = np.eye(3) * damping_factor
         b_t = sqrt_Lambda @ D @ sqrt_K + sqrt_K @ D @ sqrt_Lambda
         alpha = (2 * np.trace(b_t)) / np.sum(K)
-        return alpha
+        return min(alpha,0.1)
 
     # Compute Displacement (Δp) and Velocity (ẋ)
     delta_p = zero_force_pos_np - observed_pos_np  # Position displacement
@@ -49,28 +49,32 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
     for t in range(force_np.shape[0]):  # Loop over each timestep
 
         def translation_residuals(k_t):
-            """Residual function for translational stiffness at timestep t."""
-            alpha_t = compute_alpha(Lambda_t, k_t)  # Compute α dynamically
+            alpha_t = compute_alpha(Lambda_t, k_t)
             predicted_force = k_t * (delta_p[t] - alpha_t * velocity[t])
+            
+            residuals = force_np[t] - predicted_force
+            #print(f"t={t}, k_t={k_t}, alpha_t={alpha_t}, residuals={residuals}")
+            
+            return residuals.flatten()
 
-            return (force_np[t] - predicted_force).flatten()
 
         def rotation_residuals(k_r):
             """Residual function for rotational stiffness at timestep t."""
             alpha_r = compute_alpha(Lambda_r, k_r)
-            predicted_moment = k_r * (u_0[t] * theta[t] - alpha_r * moment_np[t])
-
+            predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t] - alpha_r * moment_np[t])
 
             residuals = moment_np[t] - predicted_moment
             return residuals.flatten()
 
         # Initial stiffness estimates
-        k_t_init = np.array([650, 650, 650])
-        k_r_init = np.array([10, 10, 10])
+        k_t_init = np.array([699, 799, 899])
+        k_r_init = np.array([14, 19, 24])
+
 
         # Use bounded optimization methods
-        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(1e-3, np.inf))
-        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(1e-3, 500))
+        #print(translation_residuals)
+        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(100,5000))
+        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(5, 500))
 
         # Store per-timestep stiffness values
         k_t_estimated_over_time.append(k_t_solution.x)
@@ -179,11 +183,11 @@ k_t_estimated_over_time, k_r_estimated_over_time = estimate_stiffness_per_sequen
 )
 
 # Print results
-print("\nEstimated Translational Stiffness (first 10 timesteps):")
-print(k_t_estimated_over_time[:10])
+print("\nEstimated Translational Stiffness (first 100 timesteps):")
+print(k_t_estimated_over_time[:100])
 
-print("\nEstimated Rotational Stiffness (first 10 timesteps):")
-print(k_r_estimated_over_time[:10])
+print("\nEstimated Rotational Stiffness (first 100 timesteps):")
+print(k_r_estimated_over_time[:100])
 
 # Plot estimated stiffness over time
 plt.figure(figsize=(12, 5))
