@@ -19,11 +19,11 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
     
     def compute_alpha(Lambda, K, damping_factor=0.7):
         """Computes damping parameter α using mass-inertia properties."""
-        U, Sigma, _ = np.linalg.svd(Lambda)  # Eigen decomposition
-        Sigma = np.diag(np.sqrt(np.maximum(Sigma, 1e-6)))  # Avoid NaNs
-        sqrt_Lambda = U @ Sigma @ U.T
-
-        K = np.clip(K, 1e-6, None)  # Ensure no negative values
+        U, Sigma, Vt = np.linalg.svd(Lambda)  # Eigen decomposition
+        Sigma = np.sqrt(np.maximum(Sigma, 1e-6))  # Square root of singular values (ensure no negative)
+        sqrt_Lambda = U @ np.diag(Sigma) @ Vt  # Reconstruct sqrt(Lambda)
+        
+        K = np.clip(K, 1e-6, None)  # Ensure non-negative values
         sqrt_K = np.diag(np.sqrt(K))
 
         D = np.eye(3) * damping_factor
@@ -35,12 +35,12 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
     delta_p = zero_force_pos_np - observed_pos_np  # Position displacement
     velocity = np.gradient(observed_pos_np, time_array, axis=0)  # Velocity estimate
 
-    # Compute quaternion difference (rotation from zero-force to observed)
-    q_diff = R.from_quat(observed_q_np) * R.from_quat(zero_force_q_np).inv()
+    q_diff = R.from_quat(zero_force_q_np).inv() * R.from_quat(observed_q_np)  # Reverse multiplication order
+    rotvec = q_diff.as_rotvec()
 
-    # Extract rotation angle using rotation vector (safe method)
-    theta = np.linalg.norm(q_diff.as_rotvec(), axis=1)
-    u_0 = q_diff.as_rotvec() / np.expand_dims(theta + 1e-6, axis=1)  # Normalize
+    theta = np.linalg.norm(rotvec, axis=1)
+    theta[theta < 1e-6] = 1e-6  # Avoid division by zero
+    u_0 = rotvec / theta[:, np.newaxis]  # Normalize rotation vector
 
     # Store stiffness values for each timestep
     k_t_estimated_over_time = []
@@ -51,13 +51,16 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         def translation_residuals(k_t):
             """Residual function for translational stiffness at timestep t."""
             alpha_t = compute_alpha(Lambda_t, k_t)  # Compute α dynamically
-            predicted_force = np.diag(k_t) @ (delta_p[t] - alpha_t * velocity[t])
+            predicted_force = k_t * (delta_p[t] - alpha_t * velocity[t])
+
             return (force_np[t] - predicted_force).flatten()
 
         def rotation_residuals(k_r):
             """Residual function for rotational stiffness at timestep t."""
             alpha_r = compute_alpha(Lambda_r, k_r)
-            predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t] - alpha_r * moment_np[t])
+            predicted_moment = k_r * (u_0[t] * theta[t] - alpha_r * moment_np[t])
+
+
             residuals = moment_np[t] - predicted_moment
             return residuals.flatten()
 
@@ -66,8 +69,8 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         k_r_init = np.array([10, 10, 10])
 
         # Use bounded optimization methods
-        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(1e-6, np.inf))
-        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(1e-6, 1000))
+        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(1e-3, np.inf))
+        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(1e-3, 500))
 
         # Store per-timestep stiffness values
         k_t_estimated_over_time.append(k_t_solution.x)
