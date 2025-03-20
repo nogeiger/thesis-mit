@@ -30,7 +30,7 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         D = np.eye(3) * damping_factor
         b_t = sqrt_Lambda @ D @ sqrt_K + sqrt_K @ D @ sqrt_Lambda
         alpha = (2 * np.trace(b_t)) / np.sum(K)
-        return min(alpha,0.1)
+        return min(alpha,0.01)
         
 
     # Compute Displacement (Δp) and Velocity (ẋ)
@@ -43,7 +43,8 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
 
     theta = np.linalg.norm(rotvec, axis=1)
     theta = np.clip(theta, 1e-6, None)  # Ensure it's never too small
-    u_0 = rotvec / theta[:, np.newaxis]  # Normalize rotation vector
+    u_0 = np.where(theta[:, np.newaxis] > 1e-3, rotvec / theta[:, np.newaxis], rotvec)
+
 
 
     # Store stiffness values for each timestep
@@ -62,15 +63,19 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
             
             return residuals.flatten()
 
-        def rotation_residuals(k_r):
+        def rotation_residuals(log_k_r):
+            k_r = np.exp(log_k_r)  # Work in log-space
             alpha_r = compute_alpha(Lambda_r, k_r)
             predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t]) - alpha_r * np.diag(k_r) @ omega[t]
-            residuals = (moment_np[t] - predicted_moment) / (np.linalg.norm(moment_np[t]) + 1e-3)
-            return residuals.flatten()
+            residuals = predicted_moment - moment_np[t] 
+
+
+            return residuals.flatten() 
 
 
         k_t_init = k_t_estimated_over_time[-1] if t > 0 else np.array([1000, 1200, 1400])
-        k_r_init = (np.mean(k_r_estimated_over_time[-5:], axis=0) * 0.6) + (true_k_r * 0.4) if t > 5 else np.array([15, 20, 25])
+        k_r_init = np.array([2, 15, 30]) #if t == 0 else k_r_estimated_over_time[-1]
+
 
 
 
@@ -81,7 +86,7 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         # Use bounded optimization methods
         #print(translation_residuals)
         k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(1e-6, np.inf))
-        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(10, 40))
+        k_r_solution = least_squares(rotation_residuals, np.log(k_r_init), method='dogbox', bounds=(np.log(1), np.log(100)))
 
 
         # Store per-timestep stiffness values
@@ -109,10 +114,15 @@ moment_np = data[["m_x", "m_y", "m_z"]].values
 zero_force_pos_np = data[["x0", "y0", "z0"]].values
 observed_pos_np = data[["x", "y", "z"]].values
 
-zero_force_q_np = data[["u0_x", "u0_y", "u0_z", "theta0"]].values
-observed_q_np = data[["u_x", "u_y", "u_z", "theta"]].values
+zero_force_q_np = data[["u0_x",        def rotation_residuals(k_r):
+            alpha_r = compute_alpha(Lambda_r, k_r)
+            predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t]) - alpha_r * np.diag(k_r) @ omega[t]
+            residuals = moment_np[t] - predicted_moment
 
-# Extract the translational and rotational mass matrices (Lambda_t and Lambda_r)
+            # Stronger penalty for k_r_x if it's too small
+            regularization = 0.01 * (k_r - np.mean(true_k_r))**2  
+            regularization[0] *= 10  # Extra penalty for k_r_x
+            return residuals.flatten() + regularization.flatten()d rotational mass matrices (Lambda_t and Lambda_r)
 Lambda_t = data[["lambda_11", "lambda_12", "lambda_13",
                  "lambda_21", "lambda_22", "lambda_23",
                  "lambda_31", "lambda_32", "lambda_33"]].values.reshape(-1, 3, 3)
@@ -142,23 +152,25 @@ print(k_t_estimated_over_time[:20])
 print("First few estimated rotational stiffness values:")
 print(k_r_estimated_over_time[:20])'
 '''
+
+
+
 # Set random seed for reproducibility
-np.random.seed(42)
+#np.random.seed(42)
 
 # Number of time steps
-T = 25
+T = 50
 
 # Define ground truth stiffness values
 true_k_t = np.array([700, 800, 900])  # Translational stiffness
-true_k_r = np.array([15, 20, 25])  # Rotational stiffness
+true_k_r = np.array([5, 20, 25])  # Rotational stiffness
 
 # Generate time array (assuming uniform sampling)
 time_array = np.linspace(0, 10, T)  # 10s total
 
 # Generate small displacements around equilibrium
 zero_force_pos_np = np.zeros((T, 3))  # Reference positions
-observed_pos_np = zero_force_pos_np + np.random.uniform(-0.01, 0.01, (T, 3))  # Small random shifts
-
+observed_pos_np = zero_force_pos_np + np.random.uniform(-1, 1, (T, 3))  # Small random shifts
 
 
 
@@ -241,3 +253,4 @@ print(avg_k_t)
 
 print("\nAverage Estimated Rotational Stiffness:")
 print(avg_k_r)
+
