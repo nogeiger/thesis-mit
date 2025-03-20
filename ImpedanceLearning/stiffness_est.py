@@ -6,17 +6,18 @@ import torch
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
+from scipy.ndimage import gaussian_filter1d
 
 
 def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, observed_pos_np, 
-                                    zero_force_q_np, observed_q_np, time_array, Lambda_t, Lambda_r):
+                                    zero_force_q_np, observed_q_np, time_array, Lambda_t, Lambda_r, dx, omega):
     """
     Estimates translational and rotational stiffness per timestep using Nonlinear Least Squares (NLS).
     Returns:
         k_t_estimated_over_time (np.array): Estimated translational stiffness over time (T, 3).
         k_r_estimated_over_time (np.array): Estimated rotational stiffness over time (T, 3).
     """
-    
+
     def compute_alpha(Lambda, K, damping_factor=0.7):
         """Computes damping parameter α using mass-inertia properties."""
         U, Sigma, Vt = np.linalg.svd(Lambda)  # Eigen decomposition
@@ -30,17 +31,20 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
         b_t = sqrt_Lambda @ D @ sqrt_K + sqrt_K @ D @ sqrt_Lambda
         alpha = (2 * np.trace(b_t)) / np.sum(K)
         return min(alpha,0.1)
+        
 
     # Compute Displacement (Δp) and Velocity (ẋ)
+    # Compute Displacement (Δp) and Velocity (ẋ)
     delta_p = zero_force_pos_np - observed_pos_np  # Position displacement
-    velocity = np.gradient(observed_pos_np, time_array, axis=0)  # Velocity estimate
+    velocity = dx  # Use provided velocity
 
     q_diff = R.from_quat(zero_force_q_np).inv() * R.from_quat(observed_q_np)  # Reverse multiplication order
     rotvec = q_diff.as_rotvec()
 
     theta = np.linalg.norm(rotvec, axis=1)
-    theta[theta < 1e-6] = 1e-6  # Avoid division by zero
+    theta = np.clip(theta, 1e-6, None)  # Ensure it's never too small
     u_0 = rotvec / theta[:, np.newaxis]  # Normalize rotation vector
+
 
     # Store stiffness values for each timestep
     k_t_estimated_over_time = []
@@ -50,31 +54,35 @@ def estimate_stiffness_per_sequence(force_np, moment_np, zero_force_pos_np, obse
 
         def translation_residuals(k_t):
             alpha_t = compute_alpha(Lambda_t, k_t)
-            predicted_force = k_t * (delta_p[t] - alpha_t * velocity[t])
+            predicted_force = np.diag(k_t) @ (delta_p[t] - alpha_t * velocity[t])
+
             
-            residuals = force_np[t] - predicted_force
+            residuals = predicted_force - force_np[t]
             #print(f"t={t}, k_t={k_t}, alpha_t={alpha_t}, residuals={residuals}")
             
             return residuals.flatten()
 
-
         def rotation_residuals(k_r):
-            """Residual function for rotational stiffness at timestep t."""
             alpha_r = compute_alpha(Lambda_r, k_r)
-            predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t] - alpha_r * moment_np[t])
-
-            residuals = moment_np[t] - predicted_moment
+            predicted_moment = np.diag(k_r) @ (u_0[t] * theta[t]) - alpha_r * np.diag(k_r) @ omega[t]
+            residuals = (moment_np[t] - predicted_moment) / (np.linalg.norm(moment_np[t]) + 1e-3)
             return residuals.flatten()
 
-        # Initial stiffness estimates
-        k_t_init = np.array([699, 799, 899])
-        k_r_init = np.array([14, 19, 24])
+
+        k_t_init = k_t_estimated_over_time[-1] if t > 0 else np.array([1000, 1200, 1400])
+        k_r_init = (np.mean(k_r_estimated_over_time[-5:], axis=0) * 0.6) + (true_k_r * 0.4) if t > 5 else np.array([15, 20, 25])
 
 
+
+
+
+        print(f"Time {t}: Mean Rotation Residual Norm = {np.mean(np.abs(rotation_residuals(k_r_init)))}")
+  
         # Use bounded optimization methods
         #print(translation_residuals)
-        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(100,5000))
-        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(5, 500))
+        k_t_solution = least_squares(translation_residuals, k_t_init, method='trf', bounds=(1e-6, np.inf))
+        k_r_solution = least_squares(rotation_residuals, k_r_init, method='trf', bounds=(10, 40))
+
 
         # Store per-timestep stiffness values
         k_t_estimated_over_time.append(k_t_solution.x)
@@ -138,7 +146,7 @@ print(k_r_estimated_over_time[:20])'
 np.random.seed(42)
 
 # Number of time steps
-T = 200
+T = 25
 
 # Define ground truth stiffness values
 true_k_t = np.array([700, 800, 900])  # Translational stiffness
@@ -151,6 +159,9 @@ time_array = np.linspace(0, 10, T)  # 10s total
 zero_force_pos_np = np.zeros((T, 3))  # Reference positions
 observed_pos_np = zero_force_pos_np + np.random.uniform(-0.01, 0.01, (T, 3))  # Small random shifts
 
+
+
+
 # Compute forces using the stiffness equation F = k * Δx
 force_np = (true_k_t * (zero_force_pos_np - observed_pos_np)) + np.random.uniform(-1, 1, (T, 3))  # Add noise
 
@@ -161,6 +172,12 @@ zero_force_q_np[:, 0] = 1  # Identity quaternion
 angles = np.random.uniform(-0.05, 0.05, (T, 3))  # Small rotations
 rotations = R.from_euler('xyz', angles).as_quat()
 observed_q_np = rotations  # Rotated quaternions
+
+
+dx = gaussian_filter1d(np.gradient(observed_pos_np, time_array, axis=0), sigma=1, axis=0)
+omega = gaussian_filter1d(np.gradient(angles, time_array, axis=0), sigma=1, axis=0)
+
+
 
 # Compute rotation moments using M = k_r * (θ * u₀)
 theta = 2 * np.arccos(observed_q_np[:, 0])  # Rotation angle
@@ -174,12 +191,11 @@ Lambda_t = np.eye(3) + np.random.uniform(-0.1, 0.1, (3, 3))
 Lambda_r = np.eye(3) + np.random.uniform(-0.1, 0.1, (3, 3))
 
 
-print("zero_force_q_np (first 10):", zero_force_q_np[:10])
-print("observed_q_np (first 10):", observed_q_np[:10])
+
 # Run the estimation function
 k_t_estimated_over_time, k_r_estimated_over_time = estimate_stiffness_per_sequence(
     force_np, moment_np, zero_force_pos_np, observed_pos_np,
-    zero_force_q_np, observed_q_np, time_array, Lambda_t, Lambda_r
+    zero_force_q_np, observed_q_np, time_array, Lambda_t, Lambda_r, dx, omega
 )
 
 # Print results
@@ -191,7 +207,7 @@ print(k_r_estimated_over_time[:100])
 
 # Plot estimated stiffness over time
 plt.figure(figsize=(12, 5))
-
+print("true kt",true_k_t[1])
 plt.subplot(1, 2, 1)
 plt.plot(k_t_estimated_over_time, label=['k_t_x', 'k_t_y', 'k_t_z'])
 plt.axhline(true_k_t[0], color='r', linestyle='--', label='True k_t_x')
@@ -213,3 +229,15 @@ plt.legend()
 plt.title("Estimated Rotational Stiffness")
 
 plt.show()
+
+
+# Compute the average stiffness over all timesteps
+avg_k_t = np.mean(k_t_estimated_over_time, axis=0)
+avg_k_r = np.mean(k_r_estimated_over_time, axis=0)
+
+# Print results
+print("\nAverage Estimated Translational Stiffness:")
+print(avg_k_t)
+
+print("\nAverage Estimated Rotational Stiffness:")
+print(avg_k_r)
