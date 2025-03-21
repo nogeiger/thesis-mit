@@ -57,91 +57,78 @@ def compute_statistics_per_axis(data):
   
     return stats
 
+import torch
+
 def normalize_data_per_axis(data, stats):
     """
-    Normalizes each axis (x, y, z) in both clean (pos_0) and noisy (pos) trajectories, 
-    as well as quaternions, forces, and moments.
+    Normalizes all numeric fields in the data using min-max stats.
+    Handles vectors (e.g., pos, force) and matrices (e.g., lambda).
+    Skips quaternion fields (q, q_0).
     
     Args:
-        data (list): A list of dictionaries containing clean and noisy trajectories, quaternions, and forces.
-        stats (dict): Min and max values for normalization for both clean and noisy trajectories, quaternions, and forces.
+        data (list): List of sample dictionaries with raw data.
+        stats (dict): Dictionary of min/max per key from compute_statistics_per_axis().
     
     Returns:
-        list: A list of dictionaries with normalized clean (pos_0), noisy (pos), quaternions, and forces.
+        list: List of sample dictionaries with normalized data.
     """
     normalized_data = []
-    #Quaternions are already unit
+
     for sample in data:
-        pos_0 = torch.tensor(sample["pos_0"], dtype=torch.float32)  # Clean trajectory [seq_length, 3]
-        pos = torch.tensor(sample["pos"], dtype=torch.float32)  # Noisy trajectory [seq_length, 3]
-        #q_0 = torch.tensor(sample["q_0"], dtype=torch.float32)  # Clean quaternion [seq_length, 4]
-        #q = torch.tensor(sample["q"], dtype=torch.float32)  # Noisy quaternion [seq_length, 4]
-        forces = torch.tensor(sample["force"], dtype=torch.float32)  # Forces [seq_length, 3]
-        moments = torch.tensor(sample["moment"], dtype=torch.float32)  # Forces [seq_length, 3]
+        norm_sample = {}
 
-        # Retrieve min and max values for both clean and noisy trajectories and forces
-        min_vals_pos_0, max_vals_pos_0 = stats["min_pos_0"], stats["max_pos_0"]
-        min_vals_pos, max_vals_pos = stats["min_pos"], stats["max_pos"]
-        min_vals_force, max_vals_force = stats["min_force"], stats["max_force"]
-        min_vals_moment, max_vals_moment = stats["min_moment"], stats["max_moment"]
- 
+        for key, value in sample.items():
+            if key.startswith("q"):  # Quaternions are already normalized
+                norm_sample[key] = value
+                continue
 
-        # Normalize clean trajectory (pos_0)
-        range_vals_pos_0 = max_vals_pos_0 - min_vals_pos_0
-        is_constant_pos_0 = range_vals_pos_0 == 0  # Check for constant value per axis
-        range_vals_pos_0 = torch.where(is_constant_pos_0, torch.ones_like(range_vals_pos_0), range_vals_pos_0)
-        normalized_pos_0 = (pos_0 - min_vals_pos_0) / range_vals_pos_0
+            min_key = f"min_{key}"
+            max_key = f"max_{key}"
 
-        # Normalize noisy trajectory (pos)
-        range_vals_pos = max_vals_pos - min_vals_pos
-        is_constant_pos = range_vals_pos == 0  # Check for constant value per axis
-        range_vals_pos = torch.where(is_constant_pos, torch.ones_like(range_vals_pos), range_vals_pos)
-        normalized_pos = (pos - min_vals_pos) / range_vals_pos
+            if min_key not in stats or max_key not in stats:
+                norm_sample[key] = value  # No stats available, keep original
+                continue
 
-        # Normalize forces
-        range_vals_force = max_vals_force - min_vals_force
-        is_constant_force = range_vals_force == 0  # Check for constant value per axis
-        range_vals_force = torch.where(is_constant_force, torch.ones_like(range_vals_force), range_vals_force)
-        normalized_force = (forces - min_vals_force) / range_vals_force
+            tensor_val = torch.tensor(value, dtype=torch.float32)
+            min_val = stats[min_key]
+            max_val = stats[max_key]
 
-        # Normalize moments
-        range_vals_moment = max_vals_moment - min_vals_moment
-        is_constant_moment = range_vals_moment == 0  # Check for constant value per axis
-        range_vals_moment = torch.where(is_constant_moment, torch.ones_like(range_vals_moment), range_vals_moment)
-        normalized_moment = (moments - min_vals_moment) / range_vals_moment
+            # Reshape min/max and flatten value if it's a matrix (e.g., [seq_len, 3, 3])
+            reshaped = False
+            if tensor_val.ndim == 3:
+                original_shape = tensor_val.shape
+                tensor_val = tensor_val.view(tensor_val.shape[0], -1)
+                min_val = min_val.view(-1)
+                max_val = max_val.view(-1)
+                reshaped = True
 
-        # Assign fixed normalized value (e.g., 0.5) for constant axes
-        for axis in range(pos_0.shape[-1]):  # Iterate over x, y, z
-            if is_constant_pos_0[axis].item():
-                normalized_pos_0[:, axis] = 0.5
-            if is_constant_pos[axis].item():
-                normalized_pos[:, axis] = 0.5
-            if is_constant_force[axis].item():
-                normalized_force[:, axis] = 0.5
-            if is_constant_moment[axis].item():
-                normalized_moment[:, axis] = 0.5
+            # Compute range and handle constant dims
+            range_val = max_val - min_val
+            is_constant = range_val == 0
+            range_val = torch.where(is_constant, torch.ones_like(range_val), range_val)
 
-        # Debugging: Check for anomalies
-        if torch.any(torch.isinf(normalized_pos_0)) or torch.any(torch.isnan(normalized_pos_0)):
-            print("Error: Found inf/nan in normalized_pos_0:", normalized_pos_0)
-        if torch.any(torch.isinf(normalized_pos)) or torch.any(torch.isnan(normalized_pos)):
-            print("Error: Found inf/nan in normalized_pos:", normalized_pos)
-        if torch.any(torch.isinf(normalized_force)) or torch.any(torch.isnan(normalized_force)):
-            print("Error: Found inf/nan in normalized_force:", normalized_force)
-        if torch.any(torch.isinf(normalized_moment)) or torch.any(torch.isnan(normalized_moment)):
-            print("Error: Found inf/nan in normalized_moment:", normalized_moment)
+            # Normalize
+            norm_val = (tensor_val - min_val) / range_val
 
-        # Append normalized data (both pos_0, pos, and force)
-        normalized_data.append({
-            "pos_0": normalized_pos_0,
-            "pos": normalized_pos,
-            "q_0": sample["q_0"],#q_0,
-            "q": sample["q"],#q,
-            "force": normalized_force,
-            "moment": normalized_moment
-        })
+            # Set constant dimensions to 0.5
+            for axis in range(norm_val.shape[-1]):
+                if is_constant[axis].item():
+                    norm_val[:, axis] = 0.5
+
+            # Reshape back if flattened earlier
+            if reshaped:
+                norm_val = norm_val.view(original_shape)
+
+            # Sanity check
+            if torch.any(torch.isnan(norm_val)) or torch.any(torch.isinf(norm_val)):
+                print(f"Warning: NaN/Inf detected in normalized field '{key}'")
+
+            norm_sample[key] = norm_val
+
+        normalized_data.append(norm_sample)
 
     return normalized_data
+
 
 
 def axis_angle_to_quaternion(axis, angle):
@@ -305,14 +292,14 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                     ], axis=-1)
 
                     # Optional fields
-                    delta_pos = None
+                    dx = None
                     angular_velocity = None
                     lambda_matrix = None
                     lambda_w_matrix = None
                    
                     if {"dx", "dy", "dz"}.issubset(df.columns):
                         
-                        delta_pos = np.stack([
+                        dx = np.stack([
                             df["dx"].iloc[i:i + seq_length].values,
                             df["dy"].iloc[i:i + seq_length].values,
                             df["dz"].iloc[i:i + seq_length].values
@@ -344,8 +331,8 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                         "moment": moments
                     }
 
-                    if delta_pos is not None:
-                        sample["delta_pos"] = delta_pos
+                    if dx is not None:
+                        sample["dx"] = dx
                     if angular_velocity is not None:
                         sample["omega"] = angular_velocity
                     if lambda_matrix is not None:
