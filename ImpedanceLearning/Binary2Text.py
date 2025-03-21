@@ -5,10 +5,10 @@ import os
 import glob
 
 # Directory containing .bin files
-binary_folder = "Data/"  
+binary_folder = "Data"  
 
 # Define the correct number of categories (columns)
-column_count = 21  # We confirmed earlier
+column_count = 21 + 24  # We confirmed earlier
 
 # Define the column names based on C++ variables
 column_names = [
@@ -21,6 +21,10 @@ column_names = [
     "theta",
     "u0_x", "u0_y", "u0_z",
     "theta0",
+    "dx", "dy", "dz",
+    "lambda_11", "lambda_12", "lambda_13", "lambda_21", "lambda_22", "lambda_23", "lambda_31", "lambda_32", "lambda_33",
+    "omega_x", "omega_y", "omega_z",
+    "lambda_w_11", "lambda_w_12", "lambda_w_13", "lambda_w_21", "lambda_w_22", "lambda_w_23", "lambda_w_31", "lambda_w_32", "lambda_w_33",
 ]
 
 # Find all .bin files in the directory

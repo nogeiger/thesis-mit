@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from utils import loss_function, quaternion_loss, add_noise, quaternion_inverse, quaternion_multiply, smooth_quaternions_slerp, quaternion_to_axis
-from stiffness_est import estimate_stiffness_per_sequence
+
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -59,7 +59,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         
         # Use tqdm to create a progress bar
 
-        for batch_idx, (pos_0, pos, q_0, q, force, moment) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
             # Move data to device
             clean_pos = pos_0.to(device)
@@ -184,7 +184,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
     # Use tqdm to create a progress bar
     with torch.no_grad():
-        for batch_idx, (pos_0, pos, q_0, q, force, moment)in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
             clean_pos = pos_0.to(device)
             noisy_pos = pos.to(device)
             clean_q = q_0.to(device)
@@ -256,15 +256,16 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
     for sample_idx, idx in enumerate(sample_indices):
         # Fetch a **random sample** instead of always using the first batch
-        clean_pos, noisy_pos, clean_q, noisy_q, force, moment = val_data[idx]
-
+        pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
+   
         # Move data to the correct device
-        clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
-        noisy_pos = noisy_pos.unsqueeze(0).to(device)
-        clean_q = clean_q.unsqueeze(0).to(device)
-        noisy_q = noisy_q.unsqueeze(0).to(device)
+        clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
+        noisy_pos = pos.unsqueeze(0).to(device)
+        clean_q = q_0.unsqueeze(0).to(device)
+        noisy_q = q.unsqueeze(0).to(device)
         force = force.unsqueeze(0).to(device)
         moment = moment.unsqueeze(0).to(device)
+    
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
@@ -276,7 +277,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
-    
+       
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -477,15 +478,15 @@ def inference_application(model, application_loader, application_dataset, device
 
     for seq_idx in range(num_sequences):
         # Fetch the sequence in order
-        clean_pos, noisy_pos, clean_q, noisy_q, force, moment = application_data[seq_idx]
+        pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
 
         # Move data to the correct device
-        clean_pos = clean_pos.unsqueeze(0).to(device)  # Add batch dimension
-        noisy_pos = noisy_pos.unsqueeze(0).to(device)
-        clean_q = clean_q.unsqueeze(0).to(device)
-        noisy_q = noisy_q.unsqueeze(0).to(device)
-        force = force.unsqueeze(0).to(device)
-        moment = moment.unsqueeze(0).to(device)
+        clean_pos = pos_0.to(device)  # Add batch dimension
+        noisy_pos = pos.to(device)
+        clean_q = q_0.to(device)
+        noisy_q = q.to(device)
+        force = force.to(device)
+        moment = moment.to(device)
 
 
         # Start iterative denoising
