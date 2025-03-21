@@ -11,54 +11,51 @@ import pandas as pd
 
 def compute_statistics_per_axis(data):
     """
-    Computes min and max for each axis (x, y, z) for both clean and noisy trajectories in the dataset.
+    Computes per-axis min and max statistics for all array-like fields in the dataset.
+    It dynamically detects all keys present across all samples (not just the first one).
 
     Args:
-        data (list): A list of dictionaries containing clean and noisy trajectories.
+        data (list): A list of dictionaries, each sample containing various data arrays.
 
     Returns:
-        dict: A dictionary containing min and max for each axis (x, y, z) for both clean and noisy trajectories.
+        dict: A dictionary with min and max values for each key in the data.
     """
-    # Concatenate positional data
-    pos_0_data = np.concatenate([sample["pos_0"] for sample in data], axis=0).astype(np.float32)
-    pos_data = np.concatenate([sample["pos"] for sample in data], axis=0).astype(np.float32)
-    force_data = np.concatenate([sample["force"] for sample in data], axis=0).astype(np.float32)
-    moment_data = np.concatenate([sample["moment"] for sample in data], axis=0).astype(np.float32)
-
-    
-    # Compute min/max for each component
-    min_vals_pos_0 = torch.tensor(np.min(pos_0_data, axis=0), dtype=torch.float32)
-    max_vals_pos_0 = torch.tensor(np.max(pos_0_data, axis=0), dtype=torch.float32)
-    min_vals_pos = torch.tensor(np.min(pos_data, axis=0), dtype=torch.float32)
-    max_vals_pos = torch.tensor(np.max(pos_data, axis=0), dtype=torch.float32)
-    min_vals_force = torch.tensor(np.min(force_data, axis=0), dtype=torch.float32)
-    max_vals_force = torch.tensor(np.max(force_data, axis=0), dtype=torch.float32)
-    min_vals_moment = torch.tensor(np.min(moment_data, axis=0), dtype=torch.float32)
-    max_vals_moment = torch.tensor(np.max(moment_data, axis=0), dtype=torch.float32)
-
-
-    # Prevent division by zero for constant axes in both pos_0 and pos
+    stats = {}
     epsilon = 1e-8
-    max_vals_pos_0 = torch.where(max_vals_pos_0 == min_vals_pos_0, max_vals_pos_0 + epsilon, max_vals_pos_0)
-    max_vals_pos = torch.where(max_vals_pos == min_vals_pos, max_vals_pos + epsilon, max_vals_pos)
-    max_vals_force = torch.where(max_vals_force == min_vals_force, max_vals_force + epsilon, max_vals_force)
-    max_vals_moment = torch.where(max_vals_moment == min_vals_moment, max_vals_moment + epsilon, max_vals_moment)
+
+    if not data:
+        return stats
+
+    # Step 1: Collect all unique keys across all samples
+    all_keys = set()
+    for sample in data:
+        all_keys.update(sample.keys())
 
 
+    # Step 2: For each key, try to concatenate and compute min/max
+    for key in all_keys:
+        if key.startswith("q"):  # Skip quaternion stats
+            continue
 
-    # Return the min and max for both pos_0 (clean) and pos (noisy), per axis (x, y, z)
-    #Quaternions are already unit
-    return {
-        "min_pos_0": min_vals_pos_0, 
-        "max_pos_0": max_vals_pos_0, 
-        "min_pos": min_vals_pos, 
-        "max_pos": max_vals_pos,
-        "min_force": min_vals_force,
-        "max_force": max_vals_force,
-        "min_moment": min_vals_moment,
-        "max_moment": max_vals_moment
-    }
+        try:
+            # Collect valid arrays for this key
+            stacked = np.concatenate(
+                [sample[key] for sample in data if key in sample], axis=0
+            ).astype(np.float32)
 
+            min_vals = torch.tensor(np.min(stacked, axis=0), dtype=torch.float32)
+            max_vals = torch.tensor(np.max(stacked, axis=0), dtype=torch.float32)
+
+            # Avoid division by zero
+            max_vals = torch.where(max_vals == min_vals, max_vals + epsilon, max_vals)
+
+            stats[f"min_{key}"] = min_vals
+            stats[f"max_{key}"] = max_vals
+
+        except Exception as e:
+            print(f"Skipping key '{key}' due to error during stats computation: {e}")
+  
+    return stats
 
 def normalize_data_per_axis(data, stats):
     """
@@ -194,34 +191,30 @@ def generate_data(num_samples=10000, seq_length=100):
 def load_robot_data(folder_path, seq_length, use_overlap=True):
     """
     Loads real trajectory data from all text files in a folder and formats it like the generated data.
+    Handles both old and new formats with optional fields.
 
     Args:
         folder_path (str): Path to the folder containing the input text files.
         seq_length (int): Length of each trajectory segment.
+        use_overlap (bool): Whether to use overlapping windows or not.
 
     Returns:
-        list: A combined list of dictionaries, each containing 'pos_0' with shape [seq_length, 3] and 'force' with shape [seq_length, 3].
+        list: A combined list of dictionaries, each containing trajectory and sensor data.
     """
     all_data = []
-     # Set stride based on flag
-    stride = 10 if use_overlap else seq_length  # Overlapping = stride 10, Non-overlapping = full seq length
+    stride = 10 if use_overlap else seq_length
 
-    # Iterate over all text files in the folder
     for filename in os.listdir(folder_path):
-        if filename.endswith(".txt"):  # Process only text files
+        if filename.endswith(".txt"):
             filepath = os.path.join(folder_path, filename)
             try:
-                # Load the data while skipping the header row
-                df = pd.read_csv(filepath, sep="\t", skiprows=2, header=None, dtype=str)  # Read as strings first
-
-                # Convert all columns to numeric, setting non-numeric values to NaN
+                df = pd.read_csv(filepath, sep="\t", skiprows=2, header=None, dtype=str)
                 df = df.apply(pd.to_numeric, errors="coerce")
-
-                # Drop any rows that contain NaN (i.e., rows with non-numeric data)
                 df.dropna(inplace=True)
 
-                # Rename columns after ensuring the data is clean
-                df.columns = [    "time", 
+                # Assign expected base columns
+                base_columns = [
+                    "time", 
                     "f_x", "f_y", "f_z", 
                     "m_x", "m_y", "m_z", 
                     "x", "y", "z", 
@@ -229,36 +222,69 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                     "u_x", "u_y", "u_z",
                     "theta",
                     "u0_x", "u0_y", "u0_z",
-                    "theta0",
+                    "theta0"
                 ]
-                # Verify the total rows and sequence length
+
+                # Optional columns (expected order if present)
+                optional_columns = [
+                    "dx", "dy", "dz",
+                    "omega_x", "omega_y", "omega_z",
+                    "lambda_11", "lambda_12", "lambda_13",
+                    "lambda_21", "lambda_22", "lambda_23",
+                    "lambda_31", "lambda_32", "lambda_33",
+                    "lambda_w_11", "lambda_w_12", "lambda_w_13",
+                    "lambda_w_21", "lambda_w_22", "lambda_w_23",
+                    "lambda_w_31", "lambda_w_32", "lambda_w_33"
+                ]
+
+               # Total expected columns
+                total_columns = base_columns + optional_columns
+
+                # Assign column names for however many columns exist
+                num_cols = df.shape[1]
+                all_names = base_columns + optional_columns
+                if num_cols > len(all_names):
+                    raise ValueError(f"Too many columns in file: {filename}. Got {num_cols}, expected max {len(all_names)}")
+                df.columns = all_names[:num_cols]
+
+
                 if len(df) < seq_length:
                     print(f"Skipping file {filename} as it contains fewer rows ({len(df)}) than the required sequence length ({seq_length}).")
                     continue
 
-                file_data = []  # Temporary storage for data from the current file
+                file_data = []
 
-                # Extract clean trajectories for x, y, z and stack them
-                #for i in range(0, len(df) - seq_length + 1, seq_length):
-                for i in range(0, len(df) - seq_length + 1, stride):  #overlapping slicing with stride 10
-                    clean_trajectory = np.stack([df["x0"].iloc[i:i + seq_length].values,
-                                                 df["y0"].iloc[i:i + seq_length].values,
-                                                 df["z0"].iloc[i:i + seq_length].values], axis=-1)
-                    noisy_trajectory = np.stack([df["x"].iloc[i:i + seq_length].values,
-                                                 df["y"].iloc[i:i + seq_length].values,
-                                                 df["z"].iloc[i:i + seq_length].values], axis=-1)
-                    clean_rotation_axis = np.stack([df["u0_x"].iloc[i:i + seq_length].values,
-                                                    df["u0_y"].iloc[i:i + seq_length].values,
-                                                    df["u0_z"].iloc[i:i + seq_length].values], axis=-1)
-                    noisy_rotation_axis = np.stack([df["u_x"].iloc[i:i + seq_length].values,
-                                                    df["u_y"].iloc[i:i + seq_length].values,
-                                                    df["u_z"].iloc[i:i + seq_length].values], axis=-1)
+                for i in range(0, len(df) - seq_length + 1, stride):
+                    clean_trajectory = np.stack([
+                        df["x0"].iloc[i:i + seq_length].values,
+                        df["y0"].iloc[i:i + seq_length].values,
+                        df["z0"].iloc[i:i + seq_length].values
+                    ], axis=-1)
+
+                    noisy_trajectory = np.stack([
+                        df["x"].iloc[i:i + seq_length].values,
+                        df["y"].iloc[i:i + seq_length].values,
+                        df["z"].iloc[i:i + seq_length].values
+                    ], axis=-1)
+
+                    clean_rotation_axis = np.stack([
+                        df["u0_x"].iloc[i:i + seq_length].values,
+                        df["u0_y"].iloc[i:i + seq_length].values,
+                        df["u0_z"].iloc[i:i + seq_length].values
+                    ], axis=-1)
+
+                    noisy_rotation_axis = np.stack([
+                        df["u_x"].iloc[i:i + seq_length].values,
+                        df["u_y"].iloc[i:i + seq_length].values,
+                        df["u_z"].iloc[i:i + seq_length].values
+                    ], axis=-1)
+
                     clean_angle = np.stack([df["theta0"].iloc[i:i + seq_length].values], axis=-1)
                     noisy_angle = np.stack([df["theta"].iloc[i:i + seq_length].values], axis=-1)
+
                     clean_quaternion = axis_angle_to_quaternion(clean_rotation_axis, clean_angle)
                     noisy_quaternion = axis_angle_to_quaternion(noisy_rotation_axis, noisy_angle)
 
-                    # Check if quaternions are unit quaternions
                     if not is_unit_quaternion(clean_quaternion):
                         print("non unit quaternion", clean_quaternion)
                         print(f"Warning: Non-unit quaternion detected in {filename} (clean).")
@@ -266,31 +292,78 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                         print("non unit quaternion", noisy_quaternion)
                         print(f"Warning: Non-unit quaternion detected in {filename} (noisy).")
 
+                    forces = np.stack([
+                        df["f_x"].iloc[i:i + seq_length].values,
+                        df["f_y"].iloc[i:i + seq_length].values,
+                        df["f_z"].iloc[i:i + seq_length].values
+                    ], axis=-1)
 
-                    forces = np.stack([df["f_x"].iloc[i:i + seq_length].values,
-                                       df["f_y"].iloc[i:i + seq_length].values,
-                                       df["f_z"].iloc[i:i + seq_length].values], axis=-1)
-                    moments = np.stack([df["m_x"].iloc[i:i + seq_length].values,
-                                        df["m_y"].iloc[i:i + seq_length].values,
-                                        df["m_z"].iloc[i:i + seq_length].values], axis=-1)
-                    
+                    moments = np.stack([
+                        df["m_x"].iloc[i:i + seq_length].values,
+                        df["m_y"].iloc[i:i + seq_length].values,
+                        df["m_z"].iloc[i:i + seq_length].values
+                    ], axis=-1)
+
+                    # Optional fields
+                    delta_pos = None
+                    angular_velocity = None
+                    lambda_matrix = None
+                    lambda_w_matrix = None
+                   
+                    if {"dx", "dy", "dz"}.issubset(df.columns):
+                        
+                        delta_pos = np.stack([
+                            df["dx"].iloc[i:i + seq_length].values,
+                            df["dy"].iloc[i:i + seq_length].values,
+                            df["dz"].iloc[i:i + seq_length].values
+                        ], axis=-1)
+
+                    if {"omega_x", "omega_y", "omega_z"}.issubset(df.columns):
+                        angular_velocity = np.stack([
+                            df["omega_x"].iloc[i:i + seq_length].values,
+                            df["omega_y"].iloc[i:i + seq_length].values,
+                            df["omega_z"].iloc[i:i + seq_length].values
+                        ], axis=-1)
+
+                    lambda_cols = [f"lambda_{r}{c}" for r in range(1, 4) for c in range(1, 4)]
+                    if set(lambda_cols).issubset(df.columns):
+                        lambda_matrix = np.stack([df[col].iloc[i:i + seq_length].values for col in lambda_cols], axis=-1)
+                        lambda_matrix = lambda_matrix.reshape(seq_length, 3, 3)
+
+                    lambda_w_cols = [f"lambda_w_{r}{c}" for r in range(1, 4) for c in range(1, 4)]
+                    if set(lambda_w_cols).issubset(df.columns):
+                        lambda_w_matrix = np.stack([df[col].iloc[i:i + seq_length].values for col in lambda_w_cols], axis=-1)
+                        lambda_w_matrix = lambda_w_matrix.reshape(seq_length, 3, 3)
+
                     sample = {
                         "pos_0": clean_trajectory,
                         "pos": noisy_trajectory,
-                        "q_0": clean_quaternion,  # Replaces u_0 and theta_0
-                        "q": noisy_quaternion,  # Replaces u and theta
+                        "q_0": clean_quaternion,
+                        "q": noisy_quaternion,
                         "force": forces,
                         "moment": moments
                     }
-                    file_data.append(sample)
 
+                    if delta_pos is not None:
+                        sample["delta_pos"] = delta_pos
+                    if angular_velocity is not None:
+                        sample["omega"] = angular_velocity
+                    if lambda_matrix is not None:
+                        sample["lambda"] = lambda_matrix
+                    if lambda_w_matrix is not None:
+                        sample["lambda_w"] = lambda_w_matrix
+
+                    file_data.append(sample)
+                                  
                 print(f"Loaded {len(file_data)} samples from {filename}, each with a sequence length of {seq_length}.")
                 all_data.extend(file_data)
-
+                
             except Exception as e:
                 print(f"Error loading data from {filename}: {e}")
 
     print(f"Total loaded samples from all files: {len(all_data)}")
+
+
     return all_data
 
 
