@@ -2,9 +2,9 @@ import numpy as np
 from scipy.optimize import least_squares
 import matplotlib.pyplot as plt
 
-np.random.seed(42)  # Reproducibility
+np.random.seed(42)  # for reproducibility - remove this later
 
-# === General Utilities ===
+#compute alpha
 def compute_alpha(Lambda, k, damping_factor=0.7):
     k = np.maximum(k, 1e-3)
     eigvals, U = np.linalg.eigh(Lambda)
@@ -14,7 +14,7 @@ def compute_alpha(Lambda, k, damping_factor=0.7):
     b_t = sqrt_Lambda @ D @ sqrt_k + sqrt_k @ D @ sqrt_Lambda
     return (2 * np.trace(b_t)) / np.sum(k)
 
-# === Core Estimation Function ===
+# estimation function
 def estimate_stiffness(mode, data, prev_k=None):
     if mode == 'rotation':
         m_ext, u0, theta, omega, Lambda = data
@@ -54,7 +54,7 @@ def estimate_stiffness(mode, data, prev_k=None):
         result = least_squares(residual, k_t0, bounds=(1e-6, np.inf), method='trf', ftol=1e-6, xtol=1e-6)
         return result.x
 
-# === Plotting Utility ===
+# plotting
 def plot_stiffness(true_vals, est_vals, title):
     axes = ['x', 'y', 'z']
     fig, axs = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
@@ -69,7 +69,7 @@ def plot_stiffness(true_vals, est_vals, title):
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
-# === Rotation Test ===
+#Rotation test
 def run_rotation_tests(num_tests=50):
     prev_k_r = np.array([10.0, 10.0, 10.0])
     true_stiff = np.zeros((num_tests, 3))
@@ -100,16 +100,16 @@ def run_rotation_tests(num_tests=50):
     print("True Avg:", np.mean(true_stiff, axis=0))
     plot_stiffness(true_stiff, est_stiff, "Rotational Stiffness Estimation")
     
-# === Translation Test ===
+#Translation test
 def run_translation_tests(num_tests=50):
     k_t_true_samples = np.column_stack([
         np.random.randint(100, 141, num_tests),
         np.random.randint(80, 101, num_tests),
         np.random.randint(130, 171, num_tests)
     ])
-    Lambda_t = np.diag([200, 150, 100])
-    delta_p = np.array([0.01, 0.02, 0.015])
-    dot_p = np.array([0.05, 0.04, 0.03])
+    Lambda_t = np.diag([200, 150, 100])  # Load lambda values form script here
+    delta_p = np.array([0.01, 0.02, 0.015]) # calc x-x0, y-y0, z-z0 here
+    dot_p = np.array([0.05, 0.04, 0.03]) # use dx, dy, dz here
 
     est_stiff = np.zeros((num_tests, 3))
     errors = np.zeros((num_tests, 3))
@@ -117,7 +117,7 @@ def run_translation_tests(num_tests=50):
     for i in range(num_tests):
         k_t_true = k_t_true_samples[i]
         alpha_t = compute_alpha(Lambda_t, k_t_true)
-        f_ext = np.diag(k_t_true) @ (delta_p - alpha_t * dot_p)
+        f_ext = np.diag(k_t_true) @ (delta_p - alpha_t * dot_p) #load f_x, f_y, f_z here
 
         k_t_est = estimate_stiffness('translation', (f_ext, delta_p, dot_p, Lambda_t))
         est_stiff[i] = k_t_est
@@ -129,7 +129,7 @@ def run_translation_tests(num_tests=50):
     print("True Avg:", np.mean(k_t_true_samples, axis=0))
     plot_stiffness(k_t_true_samples, est_stiff, "Translational Stiffness Estimation")
 
-# === Run Tests ===
+#Main script
 if __name__ == "__main__":
     run_rotation_tests()
     run_translation_tests()
