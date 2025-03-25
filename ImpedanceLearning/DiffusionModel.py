@@ -213,7 +213,7 @@ def main():
 
     
     # Number of sequences to process (adjust as needed)
-    num_application_sequences = 100
+    num_application_sequences = 1#len(application_loader)
     print("_____________________________________________")
     print("-----Inference on application data-----")
     # Run inference on application data

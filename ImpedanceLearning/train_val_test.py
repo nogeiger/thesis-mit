@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from utils import loss_function, quaternion_loss, add_noise, quaternion_inverse, quaternion_multiply, smooth_quaternions_slerp, quaternion_to_axis
-from stiff import estimate_stiffness, run_translation_inference, run_translation_tests
+from stiff import estimate_stiffness, run_translation, run_rotation
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -550,23 +550,18 @@ def inference_simulation(model, application_loader, application_dataset, device,
         lambda_w_matrix_np = lambda_w_matrix.detach().cpu().numpy()
         omega_np = omega.detach().cpu().numpy()
 
-        stiffness = run_translation_tests(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
+        #Compute translational and rotational stiffness with gt clean data and denoised
+        stiffness_trans = run_translation(lambda_matrix_np, noisy_pos_np, denoised_pos_np, dx_np, force_np)
+        stiffness_trans_gt = run_translation(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
+        stiffnes_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
+        stiffnes_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
+        
+        print("Stiffness Translational GT:", stiffness_trans)
+        print("Stiffness Translational Denoised:", stiffness_trans_gt)
+        print("Stiffness Rotational GT:", stiffnes_rot)
+        print("Stiffness Rotational Denoised:", stiffnes_rot_gt)
 
-
-        break
-
-        '''
-
-        #Estimate stiffness per sequence
-        # Estimate stiffness per sequence using NLS with ground truth data only
-        k_t_estimated_gt, k_r_estimated_gt = estimate_stiffness_per_sequence(
-             force_np, moment_np, clean_pos_np, noisy_pos_np, clean_q_np, noisy_q_np, time_array
-        )
-
-        # Estimate stiffness per sequence using NLS
-        k_t_estimated, k_r_estimated = estimate_stiffness_per_sequence(
-            force_np, moment_np, denoised_pos_np, noisy_pos_np, denoised_q_np, noisy_q_np, time_array
-        )
+    '''
 
         # Repeat estimated and ground truth stiffness values for all timesteps in the sequence
         k_t_estimated_gt_repeated = np.full((T, 1), k_t_estimated_gt)  # Shape (T, 1)
