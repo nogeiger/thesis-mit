@@ -105,6 +105,7 @@ class NoisePredictorTransformer(nn.Module):
         Returns:
             torch.Tensor: Predicted clean trajectory of shape [batch_size, seq_length, 7].
         """
+
         batch_size, seq_length, _ = noisy_pos.shape
 
         # Concatenate forces with trajectory if used

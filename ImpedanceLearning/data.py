@@ -201,9 +201,10 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
     """
     all_data = []
     stride = 10 if use_overlap else seq_length  # Overlap control
-
+    
     for filename in os.listdir(folder_path):
         if filename.endswith(".txt"):
+            
             filepath = os.path.join(folder_path, filename)
             try:
                 df = pd.read_csv(filepath, sep="\t", skiprows=2, header=None, dtype=str)
@@ -239,6 +240,7 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                 file_data = []
 
                 for i in range(0, len(df) - seq_length + 1, stride):
+                    
                     # Clean & noisy position
                     clean_trajectory = np.stack([
                         df["x0"].iloc[i:i + seq_length].values,
@@ -293,13 +295,13 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
 
                     # delta_pos
                     if {"dx", "dy", "dz"}.issubset(df.columns):
-                        delta_pos = np.stack([
+                        dx = np.stack([
                             df["dx"].iloc[i:i + seq_length].values,
                             df["dy"].iloc[i:i + seq_length].values,
                             df["dz"].iloc[i:i + seq_length].values
                         ], axis=-1)
                     else:
-                        delta_pos = np.full((seq_length, 3), -9999.0, dtype=np.float32)
+                        dx = np.full((seq_length, 3), -9999.0, dtype=np.float32)
 
                     # omega
                     if {"omega_x", "omega_y", "omega_z"}.issubset(df.columns):
@@ -334,7 +336,7 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
                         "q": noisy_quaternion,
                         "force": forces,
                         "moment": moments,
-                        "delta_pos": delta_pos,
+                        "dx": dx,
                         "omega": omega,
                         "lambda": lambda_matrix,
                         "lambda_w": lambda_w_matrix
@@ -411,12 +413,12 @@ class ImpedanceDatasetDiffusion(Dataset):
         q = torch.tensor(sample["q"], dtype=torch.float32)
         force = torch.tensor(sample["force"], dtype=torch.float32) 
         moment = torch.tensor(sample["moment"], dtype=torch.float32) 
-        delta_pos = torch.tensor(sample["delta_pos"], dtype=torch.float32)
+        dx = torch.tensor(sample["dx"], dtype=torch.float32)
         omega = torch.tensor(sample["omega"], dtype=torch.float32)
         lambda_matrix = torch.tensor(sample["lambda"], dtype=torch.float32)
         lambda_w_matrix = torch.tensor(sample["lambda_w"], dtype=torch.float32)
 
-        return pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix
+        return pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix
 
     def denormalize(self, normalized_data, trajectory_type="pos_0"):
         """

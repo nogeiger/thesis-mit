@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from utils import loss_function, quaternion_loss, add_noise, quaternion_inverse, quaternion_multiply, smooth_quaternions_slerp, quaternion_to_axis
-
+from stiff import estimate_stiffness, run_translation_inference, run_translation_tests
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy.ndimage import uniform_filter1d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -59,7 +59,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
         
         # Use tqdm to create a progress bar
 
-        for batch_idx, (pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(traindataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", leave=True)):
             
             # Move data to device
             clean_pos = pos_0.to(device)
@@ -184,7 +184,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
 
     # Use tqdm to create a progress bar
     with torch.no_grad():
-        for batch_idx, (pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
+        for batch_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(dataloader, desc="Validating", leave=True)):
             clean_pos = pos_0.to(device)
             noisy_pos = pos.to(device)
             clean_q = q_0.to(device)
@@ -256,7 +256,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
     for sample_idx, idx in enumerate(sample_indices):
         # Fetch a **random sample** instead of always using the first batch
-        pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
+        pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
    
         # Move data to the correct device
         clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
@@ -312,8 +312,6 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
             denoised_q_np = denoised_q
 
-
-        
 
         # Compute mean absolute differences
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
@@ -439,7 +437,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
   
 
 
-def inference_application(model, application_loader, application_dataset, device, use_forces, save_path, num_sequences=100, num_denoising_steps=1, postprocessing=False):
+def inference_simulation(model, application_loader, application_dataset, device, use_forces, save_path, num_sequences=100, num_denoising_steps=1, postprocessing=False):
     """
     Function to perform inference on the application dataset, reconstructing sequences sequentially.
 
@@ -478,21 +476,30 @@ def inference_application(model, application_loader, application_dataset, device
 
     for seq_idx in range(num_sequences):
         # Fetch the sequence in order
-        pos_0, pos, q_0, q, force, moment, delta_pos, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
+        pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
 
         # Move data to the correct device
-        clean_pos = pos_0.to(device)  # Add batch dimension
-        noisy_pos = pos.to(device)
-        clean_q = q_0.to(device)
-        noisy_q = q.to(device)
-        force = force.to(device)
-        moment = moment.to(device)
+        clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
+        noisy_pos = pos.unsqueeze(0).to(device)
+        clean_q = q_0.unsqueeze(0).to(device)
+        noisy_q = q.unsqueeze(0).to(device)
+        force = force.unsqueeze(0).to(device)
+        moment = moment.unsqueeze(0).to(device)
+        dx = dx.unsqueeze(0).to(device)
+        omega = omega.unsqueeze(0).to(device)
+        lambda_matrix = lambda_matrix.unsqueeze(0).to(device)
+        lambda_w_matrix = lambda_w_matrix.unsqueeze(0).to(device)
 
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
         denoised_q = noisy_q.clone()
-        for _ in range(num_denoising_steps):
+
+
+        for _ in range(2):#(num_denoising_steps):
+
+
+
             predicted_noise = model(denoised_pos, denoised_q ,force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
@@ -538,7 +545,17 @@ def inference_application(model, application_loader, application_dataset, device
         T = clean_pos_np.shape[1]  # Sequence length
         time_array = np.arange(T) * 0.005  # Ensure time increments correctly
 
+        dx_np = dx.detach().cpu().numpy()
+        lambda_matrix_np = lambda_matrix.detach().cpu().numpy()
+        lambda_w_matrix_np = lambda_w_matrix.detach().cpu().numpy()
+        omega_np = omega.detach().cpu().numpy()
 
+        stiffness = run_translation_tests(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
+
+
+        break
+
+        '''
 
         #Estimate stiffness per sequence
         # Estimate stiffness per sequence using NLS with ground truth data only
@@ -555,7 +572,17 @@ def inference_application(model, application_loader, application_dataset, device
         k_t_estimated_gt_repeated = np.full((T, 1), k_t_estimated_gt)  # Shape (T, 1)
         k_r_estimated_gt_repeated = np.full((T, 1), k_r_estimated_gt)  # Shape (T, 1)
         k_t_estimated_repeated = np.full((T, 1), k_t_estimated)  # Shape (T, 1)
-        k_r_estimated_repeated = np.full((T, 1), k_r_estimated)  # Shape (T, 1)
+        k_r_estimated_repeated = np.full((T, 1), k_r_estimated)  # S
+        alpha_t = compute_alpha(Lambda_t, k_t_true)
+        f_ext = np.diag(k_t_true) @ (delta_p - alpha_t * dot_p) #load f_x, f_y, f_z here
+
+        print("alpha_t:", alpha_t)
+        print("f_ext:", f_ext)
+        k_t_est = estimate_stiffness('translation', (f_ext, delta_p, dot_p, Lambda_t))
+        est_stiff[i] = k_t_est
+        errors[i] = np.abs(k_t_est - k_t_true)
+
+    print("\n=== Translation Stiffness Estimation ===")hape (T, 1)
 
         mean_diff_k_t = np.abs(k_t_estimated_gt - k_t_estimated)
         mean_diff_k_r = np.abs(k_r_estimated_gt - k_r_estimated)
@@ -755,3 +782,4 @@ def inference_application(model, application_loader, application_dataset, device
     df.to_csv(output_file, sep='\t', index=False)
 
     print(f"Results saved to {output_file}")
+    '''

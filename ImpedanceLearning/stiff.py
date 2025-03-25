@@ -4,33 +4,6 @@ import matplotlib.pyplot as plt
 
 np.random.seed(42)  # for reproducibility - remove this later
 
-
-def quat_inverse(q):
-    q = np.array(q)
-    return np.array([q[0], -q[1], -q[2], -q[3]]) / np.dot(q, q)
-
-def quat_multiply(q1, q2):
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array([
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2
-    ])
-
-def quat_to_axis_angle(q_err):
-    q_err = q_err / np.linalg.norm(q_err)
-    w = np.clip(q_err[0], -1.0, 1.0)
-    theta = 2 * np.arccos(w)
-    sin_half_theta = np.sqrt(1 - w**2)
-    if sin_half_theta < 1e-6:
-        axis = np.array([1.0, 0.0, 0.0])
-    else:
-        axis = q_err[1:] / sin_half_theta
-    return axis, theta
-
-
 #compute alpha
 def compute_alpha(Lambda, k, damping_factor=0.7):
     k = np.maximum(k, 1e-3)
@@ -41,14 +14,10 @@ def compute_alpha(Lambda, k, damping_factor=0.7):
     b_t = sqrt_Lambda @ D @ sqrt_k + sqrt_k @ D @ sqrt_Lambda
     return (2 * np.trace(b_t)) / np.sum(k)
 
+# estimation function
 def estimate_stiffness(mode, data, prev_k=None):
     if mode == 'rotation':
-        # Now input: m_ext, q (current), q0 (desired), omega, Lambda
-        m_ext, q, q0, omega, Lambda = data
-
-        # Compute orientation error (q_err = q0⁻¹ * q)
-        q_err = quat_multiply(quat_inverse(q0), q)
-        u0, theta = quat_to_axis_angle(q_err)
+        m_ext, u0, theta, omega, Lambda = data
 
         def residual(k_r):
             alpha_r = compute_alpha(Lambda, k_r)
@@ -111,20 +80,14 @@ def run_rotation_tests(num_tests=50):
         k_r_true = np.random.randint(5, 16, 3)
         Lambda_r = np.diag(np.random.randint(20, 101, 3)) #load lambda values here
         omega = 0.01 + 0.02 * np.random.rand(3) #load omega values here
-        # Simulate rotation deviation via quaternion
-        axis = np.random.randn(3)
-        axis /= np.linalg.norm(axis)
-        theta = max(0.05, 0.05 + 0.2 * np.random.rand())  # rotation magnitude
-        q0 = np.array([1.0, 0.0, 0.0, 0.0])  # Desired orientation (identity)
-        q = np.array([np.cos(theta / 2), *(axis * np.sin(theta / 2))])  # Current orientation (rotated)
-
-        # Create torque from simulated deviation
+        u0 = np.random.randn(3)
+        u0 /= np.linalg.norm(u0) #calc the u_error here
+        theta = max(0.05, 0.05 + 0.2 * np.random.rand()) # calc theta_error here
         alpha_r = compute_alpha(Lambda_r, k_r_true)
         B_r = alpha_r * np.diag(k_r_true)
-        m_ext = np.diag(k_r_true) @ (axis * theta) - B_r @ omega  # What sensors would measure
+        m_ext = np.diag(k_r_true) @ (u0 * theta) - B_r @ omega 
 
-        # Now use q, q0 directly
-        k_r_est = estimate_stiffness('rotation', (m_ext, q, q0, omega, Lambda_r), prev_k_r)
+        k_r_est = estimate_stiffness('rotation', (m_ext, u0, theta, omega, Lambda_r), prev_k_r)
 
         true_stiff[i] = k_r_true
         est_stiff[i] = k_r_est
@@ -138,13 +101,62 @@ def run_rotation_tests(num_tests=50):
     plot_stiffness(true_stiff, est_stiff, "Rotational Stiffness Estimation")
     
 #Translation test
-def run_translation_tests(num_tests=50):
+def run_translation_tests(lambda_matrix, noisy_pos_np, clean_pos_np, dx_np,f_ext_np):
+    num_tests =1
     k_t_true_samples = np.column_stack([
         np.random.randint(100, 141, num_tests),
         np.random.randint(80, 101, num_tests),
         np.random.randint(130, 171, num_tests)
     ])
-    print("k_t_true shape:", k_t_true_samples.shape)
+
+    Lambda_t_np = lambda_matrix#np.diag([200, 150, 100])  # Load lambda values form script here
+    #Lambda_t = np.diag([200, 150, 100])  # Load lambda values form script here
+    
+    delta_p_np = noisy_pos_np - clean_pos_np#np.array([0.01, 0.02, 0.015]) # calc x-x0, y-y0, z-z0 here
+    delta_p = np.array([0.01, 0.02, 0.015]) # calc x-x0, y-y0, z-z0 here
+
+    dot_p = np.array([0.05, 0.04, 0.03]) # use dx, dy, dz here     #dx_np
+    dot_p_np = dx_np
+
+    #f_ext = f_ext_np
+    est_stiff = np.zeros((f_ext_np.shape[1], 3))
+    errors = np.zeros((num_tests, 3))
+    #print("f ext shape",f_ext_np.shape)
+    for i in range(f_ext_np.shape[1]):
+        #k_t_true = k_t_true_samples[i]
+        #alpha_t = compute_alpha(Lambda_t, k_t_true)
+        #f_ext = np.diag(k_t_true) @ (delta_p - alpha_t * dot_p) #load f_x, f_y, f_z here
+        #print("f ext shape",f_ext.shape, "f_ext_np shape",f_ext_np.shape, "f_ext_np used shape", f_ext_np[0][i].shape)
+        #print("delta_p shape",delta_p.shape, "delta_p_np shape",delta_p_np.shape, "delta_p_np used shape", delta_p_np[0][i].shape)
+        #print("dot_p shape",dot_p.shape, "dot_p_np shape",dot_p_np.shape, "dot_p_np used shape", dot_p_np[0][i].shape)
+        #print("Lambda_t shape",Lambda_t.shape, "Lambda_t_np shape",Lambda_t_np.shape, "Lambda_t_np used shape", Lambda_t_np[0][i].shape)
+        #print("lambda generated",Lambda_t, "lambda loaded",Lambda_t_np[0][i])
+        Lambda_t = np.diag(Lambda_t_np[0][i]) * np.eye(3)
+        #print("lambda new", Lambda_t)
+        print("f_ext_np[0][i]",f_ext_np[0][i])
+        print("delta_p_np[0][i]",delta_p_np[0][i])
+        print("dot_p_np[0][i]",dot_p_np[0][i])
+        print("Lambda_t",Lambda_t)
+        k_t_est = estimate_stiffness('translation', (f_ext_np[0][i], delta_p_np[0][i], dot_p_np[0][i], Lambda_t))
+        #k_t_est = estimate_stiffness('translation', (f_ext[0][i], delta_p[0][i], dot_p[0][1], Lambda_t[0][i]))
+        est_stiff[i] = k_t_est
+        #errors[i] = np.abs(k_t_est - k_t_true)
+        break
+
+    print("\n=== Translation Stiffness Estimation ===")
+    #print("Mean Error:", np.mean(errors, axis=0))
+    print("Estimated Avg:", np.mean(est_stiff, axis=0))
+    #print("True Avg:", np.mean(k_t_true_samples, axis=0))
+    #plot_stiffness(k_t_true_samples, est_stiff, "Translational Stiffness Estimation")
+
+
+#Translation test
+def run_translation_inference(num_tests=50):
+    #k_t_true_samples = np.column_stack([
+    #    np.random.randint(100, 141, num_tests),
+    #    np.random.randint(80, 101, num_tests),
+    #    np.random.randint(130, 171, num_tests)
+    #])
     Lambda_t = np.diag([200, 150, 100])  # Load lambda values form script here
     delta_p = np.array([0.01, 0.02, 0.015]) # calc x-x0, y-y0, z-z0 here
     dot_p = np.array([0.05, 0.04, 0.03]) # use dx, dy, dz here

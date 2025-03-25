@@ -9,7 +9,7 @@ import pandas as pd
 import random
 from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
-from train_val_test import train_model_diffusion, validate_model_diffusion, test_model, inference_application
+from train_val_test import train_model_diffusion, validate_model_diffusion, test_model, inference_simulation
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
 from datetime import datetime
 
@@ -23,7 +23,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 1024#2048 FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 500#00#500#00 #number of epochs
+    num_epochs = 2#500#00#500#00 #number of epochs
     learning_rate = 1e-4 #1e-3 FF#learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -59,12 +59,16 @@ def main():
 
 
     # File path to the real data
-    file_path = "Data/RealData"
+    file_path = "Data/RealDataGT"
 
     # Load real data
     data = load_robot_data(file_path, seq_length, use_overlap=True)
+
+    
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
+
+    
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
 
@@ -188,7 +192,6 @@ def main():
     save_path_test_processed = os.path.join(save_path, f"{model_name}_{timestamp}_test_postprocessed")
     os.makedirs(save_path_test_processed, exist_ok=True)
 
-
     
     # Testing
     # Load best model
@@ -197,22 +200,24 @@ def main():
     model.to(device)
     print("_____________________________________________")
     print("-----Test model without postprocessing-----")
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=False)
+    #test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(val_loader), postprocessing=False)
     print("_____________________________________________")
     print("-----Test model with postprocessing-----")
-    test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=100, postprocessing=True)
+    #test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=len(val_loader), postprocessing=True)
     
     
     #Inference application
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
     os.makedirs(save_path_application, exist_ok=True)
 
+
+    
     # Number of sequences to process (adjust as needed)
     num_application_sequences = 100
     print("_____________________________________________")
     print("-----Inference on application data-----")
     # Run inference on application data
-    inference_application(
+    inference_simulation(
         model,
         application_loader,
         application_dataset,
@@ -223,6 +228,7 @@ def main():
         num_denoising_steps=noiseadding_steps,
         postprocessing=True  # Set to False if you don't want postprocessing
     )
+    
     
     
 if __name__ == "__main__":
