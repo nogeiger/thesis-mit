@@ -5,7 +5,7 @@ import os
 import glob
 
 # Directory containing .bin files
-binary_folder = "Data"  
+binary_folder = "Data/RealDataGT"  
 
 # Define the correct number of categories (columns)
 column_count = 21 + 24  # We confirmed earlier

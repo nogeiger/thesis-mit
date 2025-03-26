@@ -496,15 +496,15 @@ def inference_simulation(model, application_loader, application_dataset, device,
         denoised_q = noisy_q.clone()
 
 
-        for _ in range(2):#(num_denoising_steps):
+        for _ in range(num_denoising_steps):
 
+            #print("here")
 
-
-            predicted_noise = model(denoised_pos, denoised_q ,force, moment) if use_forces else model(denoised_pos, denoised_q)
+            predicted_noise = model(denoised_pos, noisy_q ,force, moment) if use_forces else model(denoised_pos, denoised_q)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
-
+        #print("here too")
         # Denormalize trajectories
         noisy_pos_np = application_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = application_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -516,7 +516,7 @@ def inference_simulation(model, application_loader, application_dataset, device,
 
         force_np = application_dataset.denormalize(force.detach().cpu(), "force").numpy()
         moment_np = application_dataset.denormalize(moment.detach().cpu(), "force").numpy()
-        
+        #print("before postprocessing")
         if postprocessing == True:
             #Preprocessing of denoise
 
@@ -553,48 +553,37 @@ def inference_simulation(model, application_loader, application_dataset, device,
         #Compute translational and rotational stiffness with gt clean data and denoised
         stiffness_trans = run_translation(lambda_matrix_np, noisy_pos_np, denoised_pos_np, dx_np, force_np)
         stiffness_trans_gt = run_translation(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
-        stiffnes_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
-        stiffnes_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
+        stiffness_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
+        stiffness_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
         
-        print("Stiffness Translational GT:", stiffness_trans)
-        print("Stiffness Translational Denoised:", stiffness_trans_gt)
-        print("Stiffness Rotational GT:", stiffnes_rot)
-        print("Stiffness Rotational Denoised:", stiffnes_rot_gt)
+        #print("Stiffness Translational GT:", stiffness_trans)
+        #print("Stiffness Translational Denoised:", stiffness_trans_gt)
+        #print("Stiffness Rotational GT:", stiffness_rot)
+        #print("Stiffness Rotational Denoised:", stiffness_rot_gt)
 
-    '''
+    
 
-        # Repeat estimated and ground truth stiffness values for all timesteps in the sequence
-        k_t_estimated_gt_repeated = np.full((T, 1), k_t_estimated_gt)  # Shape (T, 1)
-        k_r_estimated_gt_repeated = np.full((T, 1), k_r_estimated_gt)  # Shape (T, 1)
-        k_t_estimated_repeated = np.full((T, 1), k_t_estimated)  # Shape (T, 1)
-        k_r_estimated_repeated = np.full((T, 1), k_r_estimated)  # S
-        alpha_t = compute_alpha(Lambda_t, k_t_true)
-        f_ext = np.diag(k_t_true) @ (delta_p - alpha_t * dot_p) #load f_x, f_y, f_z here
+        # Use actual stiffness vectors instead of repeating scalar values
+        stiffness_trans_gt_repeated = np.tile(stiffness_trans_gt.reshape(1, 3), (T, 1))  # Shape (T, 3)
+        stiffness_trans_repeated = np.tile(stiffness_trans.reshape(1, 3), (T, 1))        # Shape (T, 3)
+        stiffness_rot_gt_repeated = np.tile(stiffness_rot_gt.reshape(1, 3), (T, 1))  # Shape (T, 3)
+        stiffness_rot_repeated = np.tile(stiffness_rot.reshape(1, 3), (T, 1))        # Shape (T, 3)
 
-        print("alpha_t:", alpha_t)
-        print("f_ext:", f_ext)
-        k_t_est = estimate_stiffness('translation', (f_ext, delta_p, dot_p, Lambda_t))
-        est_stiff[i] = k_t_est
-        errors[i] = np.abs(k_t_est - k_t_true)
-
-    print("\n=== Translation Stiffness Estimation ===")hape (T, 1)
-
-        mean_diff_k_t = np.abs(k_t_estimated_gt - k_t_estimated)
-        mean_diff_k_r = np.abs(k_r_estimated_gt - k_r_estimated)
+        # Compute error vectors (optional per-step or mean later)
+        mean_diff_k_t = np.abs(stiffness_trans_gt - stiffness_trans)
+        mean_diff_k_r = np.abs(stiffness_rot_gt - stiffness_rot)
 
         mean_diffs_k_t.append(mean_diff_k_t)
         mean_diffs_k_r.append(mean_diff_k_r)
 
-        # Store ground truth stiffness values
-        gt_k_t_values.append(k_t_estimated_gt)
-        gt_k_r_values.append(k_r_estimated_gt)
+        # Store for later analysis
+        gt_k_t_values.append(stiffness_trans_gt)
+        gt_k_r_values.append(stiffness_rot_gt)
 
-
-
-        # Print the results for debugging (optional)
+        # Print for debugging
         print(f"Stiffness in sequence {seq_idx + 1}")
-        print(f"Ground truth Translational Stiffness: {k_t_estimated_gt}, Estimated Translational Stiffness: {k_t_estimated}")
-        print(f"Ground truth Rotational Stiffness: {k_r_estimated_gt}, Estimated Rotational Stiffness: {k_r_estimated}")
+        print(f"Ground truth Translational Stiffness: {stiffness_trans_gt}, Estimated Translational Stiffness: {stiffness_trans}")
+        print(f"Ground truth Rotational Stiffness: {stiffness_rot_gt}, Estimated Rotational Stiffness: {stiffness_rot}")
         print("______________________")
 
 
@@ -610,10 +599,10 @@ def inference_simulation(model, application_loader, application_dataset, device,
                 *map(float, noisy_q_np[0, t, :]),
                 *map(float, force_np[0, t, :]),  # Expands (fx, fy, fz)
                 *map(float, moment_np[0, t, :]),  # Expands (mx, my, mz)
-                *map(float, k_t_estimated_gt_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
-                *map(float, k_r_estimated_gt_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
-                *map(float, k_t_estimated_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
-                *map(float, k_r_estimated_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
+                *map(float, stiffness_trans_gt_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
+                *map(float, stiffness_rot_gt_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
+                *map(float, stiffness_trans_repeated[t,:]),  # Expands (k_t_x, k_t_y, k_t_z)
+                *map(float, stiffness_rot_repeated[t,:]),  # Expands (k_r_x, k_r_y, k_r_z)
 
             ])
 
@@ -766,8 +755,9 @@ def inference_simulation(model, application_loader, application_dataset, device,
         "Noisy_Q_W", "Noisy_Q_X", "Noisy_Q_Y", "Noisy_Q_Z",
         "Force_X", "Force_Y", "Force_Z",
         "Moment_X", "Moment_Y", "Moment_Z",
-        "GT_Stiffness_T","GT_Stiffness_R",
-        "Estimated_Stiffness_T", "Estimated_Stiffness_R",
+        "GT_Stiffness_TX", "GT_Stiffness_TY", "GT_Stiffness_TZ", "GT_Stiffness_RX", "GT_Stiffness_RY", "GT_Stiffness_RZ",
+        "Estimated_Stiffness_TX", "Estimated_Stiffness_TY", "Estimated_Stiffness_TZ", "Estimated_Stiffness_RX", "Estimated_Stiffness_RY", "Estimated_Stiffness_RZ",
+
     ]
 
     df = pd.DataFrame(all_data, columns=columns)
@@ -777,4 +767,4 @@ def inference_simulation(model, application_loader, application_dataset, device,
     df.to_csv(output_file, sep='\t', index=False)
 
     print(f"Results saved to {output_file}")
-    '''
+    

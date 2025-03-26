@@ -12,18 +12,23 @@ from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model, inference_simulation
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
 from datetime import datetime
+import gc
 
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
     """ 
-    
+    # Clear any previous GPU memory
+    torch.cuda.empty_cache()
+    gc.collect()
+
+
     # Definition of parameters
     seq_length = 16 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 1024#2048 FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 2#500#00#500#00 #number of epochs
+    num_epochs = 100#0#500#00#500#00 #number of epochs
     learning_rate = 1e-4 #1e-3 FF#learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -59,45 +64,36 @@ def main():
 
 
     # File path to the real data
-    file_path = "Data/RealDataGT"
-
+    file_path = "Data/RealData"
+    file_path_application = "Data/RealDataGT"
     # Load real data
     data = load_robot_data(file_path, seq_length, use_overlap=True)
-
-    
+    data_application = load_robot_data(file_path_application, seq_length, use_overlap=False)
     # Compute per-axis normalization statistics
     stats = compute_statistics_per_axis(data)
-
-    
+    stats_application = compute_statistics_per_axis(data_application)
     # Normalize data per axis
     normalized_data = normalize_data_per_axis(data, stats)
-
-    
+    normalized_data_application = normalize_data_per_axis(data_application, stats_application)
     # Define split ratios
-    train_ratio = 0.65 
+    train_ratio = 0.7 
     val_ratio = 0.2
     test_ratio = 0.1  
-
     # Compute split indices
     total_size = len(normalized_data)
     train_split = int(total_size * train_ratio)
     val_split = train_split + int(total_size * val_ratio)
     test_split = val_split + int(total_size * test_ratio)
-
     # Split data
     train_data = normalized_data[:train_split]
     val_data = normalized_data[train_split:val_split]
     test_data = normalized_data[val_split:test_split]
-    application_data = normalized_data[test_split:]
-
-    
 
     # Create datasets with per-axis normalization
     train_dataset = ImpedanceDatasetDiffusion(train_data, stats)
     val_dataset = ImpedanceDatasetDiffusion(val_data, stats)
     test_dataset = ImpedanceDatasetDiffusion(test_data, stats)
-    application_dataset = ImpedanceDatasetDiffusion(application_data, stats)
-    
+    application_dataset = ImpedanceDatasetDiffusion(normalized_data_application, stats_application)
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -110,8 +106,8 @@ def main():
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_name = "Transformer"
-    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
-    model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
@@ -194,26 +190,34 @@ def main():
 
     
     # Testing
+    # Clear GPU memory after training
+    del train_loader, val_loader, train_dataset, val_dataset
+    torch.cuda.empty_cache()
+
     # Load best model
     best_model_path = os.path.join(save_path, "best_model.pth")
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.to(device)
     print("_____________________________________________")
     print("-----Test model without postprocessing-----")
-    #test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(val_loader), postprocessing=False)
+    test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=False)
     print("_____________________________________________")
     print("-----Test model with postprocessing-----")
-    #test_model(model, val_loader, val_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=len(val_loader), postprocessing=True)
+    test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=True)
     
     
     #Inference application
+    # Clear GPU memory after testing
+    del test_loader, test_dataset
+    torch.cuda.empty_cache()
+
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
     os.makedirs(save_path_application, exist_ok=True)
 
 
     
     # Number of sequences to process (adjust as needed)
-    num_application_sequences = 1#len(application_loader)
+    num_application_sequences = 100#len(application_loader)
     print("_____________________________________________")
     print("-----Inference on application data-----")
     # Run inference on application data
