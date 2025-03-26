@@ -26,10 +26,10 @@ def main():
     # Definition of parameters
     seq_length = 16 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 1024#2048 FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
+    hidden_dim = 2048 #FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 100#0#500#00#500#00 #number of epochs
-    learning_rate = 1e-4 #1e-3 FF#learning rate
+    num_epochs = 500#00#500#00 #number of epochs
+    learning_rate = 1e-3 #1e-3 FF#learning rate
     noiseadding_steps = 20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
