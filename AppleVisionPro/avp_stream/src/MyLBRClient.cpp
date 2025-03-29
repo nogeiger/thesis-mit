@@ -715,6 +715,8 @@ void MyLBRClient::command()
     buffer.write(reinterpret_cast<const char*>(omega.data()), sizeof(double) * omega.size());
     buffer.write(reinterpret_cast<const char*>(Lambda_w_3d.data()), sizeof(double) * Lambda_w_3d.size());
 
+
+
     // Periodic flush to file (e.g., every 1000 iterations)
     if (buffer.str().size() > 4096) { // Write every 4KB of data
         File_data.write(buffer.str().c_str(), buffer.str().size());
