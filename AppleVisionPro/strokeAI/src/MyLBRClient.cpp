@@ -132,7 +132,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
@@ -222,6 +222,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     // # definitions can be found here: https://github.com/Improbable-AI/VisionProTeleop
     matrix_rw = new double[16];                     // wrist
+    flag_hand = false;
 
     // ************************************************************
     // Store data
@@ -270,43 +271,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // ************************************************************
     // ROBOTIC HAND INITIALIZATION
     // ************************************************************
-    hand_open = true;
-    last_button_state = false;
-
-    comm_handler_ = std::make_shared<qbrobotics_research_api::CommunicationLegacy>();
-    std::vector<serial::PortInfo> serial_ports;
-
-    if (comm_handler_->listSerialPorts(serial_ports) < 0) {
-        std::cerr << "[qbHand] No serial ports found!" << std::endl;
-    }
-
-    for (const auto& port : serial_ports) {
-        std::vector<qbrobotics_research_api::Communication::ConnectedDeviceInfo> ids;
-
-        if (comm_handler_->openSerialPort(port.serial_port) >= 0) {
-            used_ports_.insert(port.serial_port);
-
-            if (comm_handler_->listConnectedDevices(port.serial_port, ids) >= 0) {
-                std::cout << "[Init] Devices found on port: " << port.serial_port << std::endl;
-
-                for (const auto& id : ids) {
-                    if (id.id == 0 || id.id == 120) continue;
-
-                    auto hand = std::make_shared<qbrobotics_research_api::qbSoftHandLegacyResearch>(
-                        comm_handler_, "SoftHand", port.serial_port, id.id);
-
-                    soft_hands_.insert({id.id, hand});
-                    device_ids_.push_back(id);
-
-                    std::vector<int16_t> open_ref = {0};
-                    hand->setMotorStates(true);
-                    hand->setControlReferences(open_ref);
-
-                    std::cout << "  [Init] Device ID " << (int)id.id << " initialized and opened." << std::endl;
-                }
-            }
-        }
-    }
+    initializeRoboticHand();
 
     // ************************************************************
     // Initial print
@@ -480,9 +445,9 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
-    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
-    R_corrected.col(1) = R_avp_rw.col(2);       // Z becomes Y (inverted)
-    R_corrected.col(2) = -R_avp_rw.col(1);        // Y becomes Z
+    R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
+    R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)
+    R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
 
     R_avp_rw = R_corrected;
 
@@ -529,26 +494,37 @@ void MyLBRClient::command()
 
 
     // ************************************************************
-    // Move Hand HERE
+    // Move Hand
+
     bool button_pressed = robotState().getBooleanIOValue("MediaFlange.UserButton");
 
+    // --- Button logic: Toggle state on rising edge ---
     if (button_pressed && !last_button_state) {
         hand_open = !hand_open;
         std::cout << "[Hand] Button Pressed! New state: " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+    }
+    last_button_state = button_pressed;
 
-        for (const auto& id : device_ids_) {
-            if (id.id == 0 || id.id == 120) continue;
-
-            auto hand = soft_hands_.at(id.id);
-            std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{15000};
-
-            hand->setMotorStates(true);
-            hand->setControlReferences(control_refs);
-            std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
-        }
+    // --- flag_hand logic: Override if needed ---
+    if (flag_hand && hand_open) {
+        hand_open = false;
+        std::cout << "[Hand] Closing due to flag_hand=true" << std::endl;
+    } else if (!flag_hand && !hand_open) {
+        hand_open = true;
+        std::cout << "[Hand] Opening due to flag_hand=false" << std::endl;
     }
 
-    last_button_state = button_pressed;
+    // --- Apply hand state ---
+    for (const auto& id : device_ids_) {
+        if (id.id == 0 || id.id == 120) continue;
+
+        auto hand = soft_hands_.at(id.id);
+        std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{15000};
+
+        hand->setMotorStates(true);
+        hand->setControlReferences(control_refs);
+        std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+    }
 
 
     // ************************************************************
@@ -577,7 +553,6 @@ void MyLBRClient::command()
     p = H.block< 3, 1 >( 0, 3 );
 
     // Transform rotations to quaternions
-    //Eigen::Quaterniond Q(R);
     Eigen::Matrix3d R_fixed = R.block<3,3>(0,0); // Ensure it's 3x3
     Eigen::Quaterniond Q(R_fixed);
     Q.normalize();
@@ -619,7 +594,6 @@ void MyLBRClient::command()
     }
 
     // Jacobian, translational and rotation part
-    // J = myLBR->getHybridJacobian( q );
     J = myLBR->getHybridJacobian( q, pointPosition );
     Eigen::MatrixXd J_v = J.block(0, 0, 3, 7);
     Eigen::MatrixXd J_w = J.block(3, 0, 3, 7);
@@ -845,18 +819,19 @@ void MyLBRClient::runStreamerThread() {
     try {
         // Create or open shared memory
         boost::interprocess::shared_memory_object shm(
-            boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
+        boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
 
         // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
         // New: 6 * 16 doubles + ready flag 8 bytes = 6 * 16 * sizeof(double) + sizeof(int64_t)
-        shm.truncate(1 * 16 * sizeof(double) + sizeof(int64_t));
+        shm.truncate(1 * 17 * sizeof(double) + sizeof(int64_t));
 
         // Map the shared memory
         boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
 
         // Define pointers based on shared memory layout
-        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
-        double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                // First 4x4 matrix [0, :, :]
+        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address());                                                         // First 8 bytes
+        double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                 // First 4x4 matrix [0, :, :]
+        bool* flag = reinterpret_cast<bool*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + sizeof(double) * 16);                                                                                           // Bool if fingers are closed
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
@@ -873,6 +848,7 @@ void MyLBRClient::runStreamerThread() {
                 dataMutex.lock();
 
                 matrix_rw = matrix_data_rw;
+                flag_hand = flag;
 
                 dataMutex.unlock();
 
@@ -982,4 +958,50 @@ Eigen::MatrixXd MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::Mat
 
     return Lam;
 
+}
+
+
+/**
+* \brief Function to initialize the robotic hand
+*/
+void MyLBRClient::initializeRoboticHand()
+{
+    hand_open = true;
+    last_button_state = false;
+
+    comm_handler_ = std::make_shared<qbrobotics_research_api::CommunicationLegacy>();
+    std::vector<serial::PortInfo> serial_ports;
+
+    if (comm_handler_->listSerialPorts(serial_ports) < 0) {
+        std::cerr << "[qbHand] No serial ports found!" << std::endl;
+        return;
+    }
+
+    for (const auto& port : serial_ports) {
+        std::vector<qbrobotics_research_api::Communication::ConnectedDeviceInfo> ids;
+
+        if (comm_handler_->openSerialPort(port.serial_port) >= 0) {
+            used_ports_.insert(port.serial_port);
+
+            if (comm_handler_->listConnectedDevices(port.serial_port, ids) >= 0) {
+                std::cout << "[Init] Devices found on port: " << port.serial_port << std::endl;
+
+                for (const auto& id : ids) {
+                    if (id.id == 0 || id.id == 120) continue;
+
+                    auto hand = std::make_shared<qbrobotics_research_api::qbSoftHandLegacyResearch>(
+                        comm_handler_, "SoftHand", port.serial_port, id.id);
+
+                    soft_hands_.insert({id.id, hand});
+                    device_ids_.push_back(id);
+
+                    std::vector<int16_t> open_ref = {0};
+                    hand->setMotorStates(true);
+                    hand->setControlReferences(open_ref);
+
+                    std::cout << "  [Init] Device ID " << (int)id.id << " initialized and opened." << std::endl;
+                }
+            }
+        }
+    }
 }

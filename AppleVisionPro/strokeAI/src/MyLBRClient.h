@@ -119,6 +119,7 @@ private:
     void startPythonScript();
 
     double* matrix_rw;
+    bool* flag_hand;
 
     Eigen::MatrixXd H_avp_rw_ini;
     Eigen::MatrixXd R_avp_rw_ini;
@@ -229,6 +230,7 @@ private:
     std::set<std::string> used_ports_;
     std::map<uint8_t, std::shared_ptr<qbrobotics_research_api::qbSoftHandLegacyResearch>> soft_hands_;
     std::vector<qbrobotics_research_api::Communication::ConnectedDeviceInfo> device_ids_;
+    void initializeRoboticHand();
 
 
 };
