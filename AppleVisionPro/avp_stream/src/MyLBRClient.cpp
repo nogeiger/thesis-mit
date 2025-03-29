@@ -709,6 +709,12 @@ void MyLBRClient::command()
     buffer.write(reinterpret_cast<const char*>(u_0.data()), sizeof(double) * u.size());
     buffer.write(reinterpret_cast<const char*>(&theta_0), sizeof(double)); 
 
+    // Additionally for NLS
+    buffer.write(reinterpret_cast<const char*>(dx.data()), sizeof(double) * dx.size());
+    buffer.write(reinterpret_cast<const char*>(Lambda_v_3d.data()), sizeof(double) * Lambda_v_3d.size());
+    buffer.write(reinterpret_cast<const char*>(omega.data()), sizeof(double) * omega.size());
+    buffer.write(reinterpret_cast<const char*>(Lambda_w_3d.data()), sizeof(double) * Lambda_w_3d.size());
+
 
 
     // Periodic flush to file (e.g., every 1000 iterations)

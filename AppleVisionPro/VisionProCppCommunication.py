@@ -5,7 +5,7 @@ import sys
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.29.213.104"
+avp_ip = "10.29.188.233"
 
 s = VisionProStreamer(ip=avp_ip, record=True)
 

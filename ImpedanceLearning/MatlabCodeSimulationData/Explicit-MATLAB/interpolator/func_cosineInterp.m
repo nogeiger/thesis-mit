@@ -16,7 +16,7 @@ function [ x_cur ] = func_cosineInterp( x_ini, A_vec, t_cur, t_fin, nrRounds )
 
 
 % Make sure that x_ini is a scalar value
-assert( length( x_ini ) == 1 , 'Input x-value must be a scalar' );
+assert( isscalar( x_ini ) , 'Input x-value must be a scalar' );
 
 % Cosine interpolation of variable x_cur
 if t_cur <= t_fin * nrRounds
