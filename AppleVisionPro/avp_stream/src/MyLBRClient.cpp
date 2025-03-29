@@ -787,7 +787,9 @@ void MyLBRClient::runStreamerThread() {
 
         // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
         // New: 6 * 16 doubles + ready flag 8 bytes = 6 * 16 * sizeof(double) + sizeof(int64_t)
-        shm.truncate(1 * 16 * sizeof(double) + sizeof(int64_t));
+        // 18 doubles (16 for 4x4 matrix + 2 flags) * 8 + 8 bytes for version flag = 152
+        shm.truncate(1 * 17 * sizeof(double) + sizeof(int64_t));
+
 
         // Map the shared memory
         boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
