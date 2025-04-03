@@ -3,14 +3,14 @@ import numpy as np
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.31.158.93"
+avp_ip = "10.31.150.40"
 s = VisionProStreamer(ip=avp_ip, record=True)
 
-finger_closed = False
+finger_closed = True
 # Define shared memory parameters
 SHM_NAME = "SharedMemory_AVP_new"
 #SHM_SIZE = 8 + 3* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
-SHM_SIZE = 8 + 1* 16 * 8 + 8 # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix) + 8 for booleans
+SHM_SIZE = 8 + 1* 16 * 8  + 8 # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix) + 8 for booleans
 
 # Create shared memory
 try:
@@ -23,7 +23,7 @@ except FileExistsError:
 # Define shared memory regions
 version = np.ndarray((1,), dtype=np.int64, buffer=shm.buf[:8])  # Ready flag
 data = np.ndarray((1, 17), dtype=np.float64, buffer=shm.buf[8:])  # 16 + 2
-
+#data = np.ndarray((1, 16), dtype=np.float64, buffer=shm.buf[8:])  # 16 + 2
 # Initialization
 version[0] = -1  # Indicate that Python is initializing
 print("Python initialized shared memory. Waiting for C++ to start...")
@@ -38,11 +38,11 @@ try:
         r = s.latest  # Get the latest data
 
         if r['right_pinch_distance'] < 0.01:
+            finger_closed = False 
+            print("finger closed")
+        elif r['right_pinch_distance'] > 0.12:
             finger_closed = True
-            #print("finger closed")
-        elif r['right_pinch_distance'] > 0.15:
-            finger_closed = False
-            #print("finger opened")
+            print("finger opened")
 
 
         # Prepare data for shared memory
@@ -50,6 +50,10 @@ try:
             np.array(r['right_wrist'], dtype=np.float64).flatten(),
             np.array([float(finger_closed)], dtype=np.float64),
         ])
+
+        #finger_closed = True#r['right_pinch_distance'] < 0.01
+        #print("data storage: ", data_storage)
+        #print("matrix data: ", r['right_wrist'])
 
         # Write data
         if version[0] == 0:

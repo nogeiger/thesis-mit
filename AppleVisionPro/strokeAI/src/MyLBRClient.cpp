@@ -91,13 +91,21 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     /** Initialization */
     // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    qInitial[0] = -8.87 * M_PI/180;
-    qInitial[1] = 60.98 * M_PI/180;
-    qInitial[2] = 17.51 * M_PI/180;
-    qInitial[3] = -79.85 * M_PI/180;
-    qInitial[4] = -24.13 * M_PI/180;
-    qInitial[5] = 43.03 * M_PI/180;
-    qInitial[6] = 4.14 * M_PI/180;
+    // qInitial[0] = -8.87 * M_PI/180;
+    // qInitial[1] = 60.98 * M_PI/180;
+    // qInitial[2] = 17.51 * M_PI/180;
+    // qInitial[3] = -79.85 * M_PI/180;
+    // qInitial[4] = -24.13 * M_PI/180;
+    // qInitial[5] = 43.03 * M_PI/180;
+    // qInitial[6] = 4.14 * M_PI/180;
+
+    qInitial[0] = -46.88 * M_PI/180;
+    qInitial[1] = 91.03 * M_PI/180;
+    qInitial[2] = 3.21 * M_PI/180;
+    qInitial[3] = -53.77 * M_PI/180;
+    qInitial[4] = 115.35 * M_PI/180;
+    qInitial[5] = 61.21 * M_PI/180;
+    qInitial[6] = 66.59 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
     myLBR = new iiwa14( 1, "Trey");
@@ -132,7 +140,8 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );
+    //pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );      // with force sensor
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
@@ -253,19 +262,18 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // ************************************************************
     // Weight: 0.2kg (plate) + 0.255kg (sensor) = 0.455kg
 
-    // f_ext_ee = Eigen::VectorXd::Zero( 3 );
-    // m_ext_ee = Eigen::VectorXd::Zero( 3 );
-    // f_ext = Eigen::VectorXd::Zero( 3 );
-    // m_ext = Eigen::VectorXd::Zero( 3 );
+    f_ext_ee = Eigen::VectorXd::Zero( 3 );
+    m_ext_ee = Eigen::VectorXd::Zero( 3 );
+    f_ext = Eigen::VectorXd::Zero( 3 );
+    m_ext = Eigen::VectorXd::Zero( 3 );
 
-
-    // AtiForceTorqueSensor ftSensor("172.31.1.1");
+    AtiForceTorqueSensor ftSensor("172.31.1.1");
     
     // // Start threading for force sensor
-    // mutexFTS.unlock();
-    // boost::thread(&MyLBRClient::forceSensorThread, this).detach();
+    mutexFTS.unlock();
+    boost::thread(&MyLBRClient::forceSensorThread, this).detach();
 
-    // printf( "Sensor Activated. \n\n" );
+    printf( "Sensor Activated. \n\n" );
 
 
     // ************************************************************
@@ -294,7 +302,8 @@ MyLBRClient::~MyLBRClient()
 
     boost::interprocess::shared_memory_object::remove("SharedMemory_AVP");
     delete myLBR;
-    // delete this->ftSensor;
+
+    delete this->ftSensor;
 
     // if (File_data.is_open()) {
     //     File_data.close();
@@ -473,57 +482,96 @@ void MyLBRClient::command()
 
     // ****************************************************matrix********
     // Get FTSensor data
-    // double* fts_bt;
+    double* fts_bt;
 
-    // mutexFTS.lock();
+    mutexFTS.lock();
 
-    // fts_bt = f_sens_ee;
+    fts_bt = f_sens_ee;
 
-    // mutexFTS.unlock();
+    mutexFTS.unlock();
 
-    // f_ext_ee[0] = fts_bt[0];
-    // f_ext_ee[1] = fts_bt[1];
-    // f_ext_ee[2] = fts_bt[2];
-    // m_ext_ee[0] = fts_bt[3];
-    // m_ext_ee[1] = fts_bt[4];
-    // m_ext_ee[2] = fts_bt[5];
+    f_ext_ee[0] = fts_bt[0];
+    f_ext_ee[1] = fts_bt[1];
+    f_ext_ee[2] = fts_bt[2];
+    m_ext_ee[0] = fts_bt[3];
+    m_ext_ee[1] = fts_bt[4];
+    m_ext_ee[2] = fts_bt[5];
 
-    // // Convert to robot base coordinates
-    // f_ext = R * f_ext_ee;
-    // m_ext = R * m_ext_ee;
+    // Convert to robot base coordinates
+    f_ext = R * f_ext_ee;
+    m_ext = R * m_ext_ee;
+
+
+    // // ************************************************************
+    // // Move Hand
+
+    // bool button_pressed = robotState().getBooleanIOValue("MediaFlange.UserButton");
+
+    // cout << "flag_hand: " << flag_hand << endl;
+
+    // // --- Button logic: Toggle state on rising edge ---
+    // if (button_pressed && !last_button_state) {
+    //     hand_open = !hand_open;
+    //     std::cout << "[Hand] Button Pressed! New state: " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+    // }
+    // last_button_state = button_pressed;
+    
+    // // --- flag_hand logic: Override if needed ---
+    // if (flag_hand && hand_open) {
+    //     hand_open = false;
+    //     std::cout << "[Hand] Closing due to flag_hand=true" << std::endl;
+    // } else if (!flag_hand && !hand_open) {
+    //     hand_open = true;
+    //     std::cout << "[Hand] Opening due to flag_hand=false" << std::endl;
+    // }
+    
+    // // --- Apply hand state only if changed ---
+    // static bool last_hand_state = !hand_open; // Force first update
+    // if (hand_open != last_hand_state) {
+    //     for (const auto& id : device_ids_) {
+    //         if (id.id == 0 || id.id == 120) continue;
+    
+    //         auto hand = soft_hands_.at(id.id);
+    //         std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{15000};
+    
+    //         hand->setMotorStates(true);
+    //         hand->setControlReferences(control_refs);
+    //         std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+    //     }
+    //     last_hand_state = hand_open;
+    // }
+
 
 
     // ************************************************************
-    // Move Hand
+    // Move Hand (flag_hand only)
 
-    bool button_pressed = robotState().getBooleanIOValue("MediaFlange.UserButton");
+    bool flag_override = false;
 
-    // --- Button logic: Toggle state on rising edge ---
-    if (button_pressed && !last_button_state) {
-        hand_open = !hand_open;
-        std::cout << "[Hand] Button Pressed! New state: " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
-    }
-    last_button_state = button_pressed;
-
-    // --- flag_hand logic: Override if needed ---
-    if (flag_hand && hand_open) {
-        hand_open = false;
-        std::cout << "[Hand] Closing due to flag_hand=true" << std::endl;
-    } else if (!flag_hand && !hand_open) {
+    // --- Apply flag_hand logic ---
+    if (flag_hand && !hand_open) {
         hand_open = true;
-        std::cout << "[Hand] Opening due to flag_hand=false" << std::endl;
+        flag_override = true;
+        std::cout << "[Hand] Opening due to flag_hand=true" << std::endl;
+    } else if (!flag_hand && hand_open) {
+        hand_open = false;
+        flag_override = true;
+        std::cout << "[Hand] Closing due to flag_hand=false" << std::endl;
     }
 
-    // --- Apply hand state ---
-    for (const auto& id : device_ids_) {
-        if (id.id == 0 || id.id == 120) continue;
+    // --- Apply new hand command only if needed ---
+    if (flag_override) {
+        for (const auto& id : device_ids_) {
+            if (id.id == 0 || id.id == 120) continue;
 
-        auto hand = soft_hands_.at(id.id);
-        std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{15000};
+            auto hand = soft_hands_.at(id.id);
+            std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{13000};
 
-        hand->setMotorStates(true);
-        hand->setControlReferences(control_refs);
-        std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+            hand->setMotorStates(true);
+            hand->setControlReferences(control_refs);
+
+            std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+        }
     }
 
 
@@ -686,8 +734,8 @@ void MyLBRClient::command()
     double damping_factor_v = 0.7;
     Eigen::Vector3d Kp_diag = Kp.diagonal();
     Eigen::Matrix3d Lambda_v_3d = Lambda_v;
-    double alpha_v = compute_gamma(Lambda_v_3d, Kp_diag, damping_factor_v);
-    Eigen::MatrixXd Bp = alpha_v * Kp;
+    double gamma_v = compute_gamma(Lambda_v_3d, Kp_diag, damping_factor_v);
+    Eigen::MatrixXd Bp = gamma_v * Kp;
 
     // Calculate force
     Eigen::VectorXd f = Kp * del_p - Bp * dx;
@@ -704,11 +752,11 @@ void MyLBRClient::command()
     double damping_factor_r = 0.7;
     Eigen::Vector3d Kr_diag = Kr.diagonal();
     Eigen::Matrix3d Lambda_w_3d = Lambda_w;
-    double alpha_w = compute_gamma(Lambda_w_3d, Kr_diag, damping_factor_r);
-    Eigen::MatrixXd Br = alpha_w * Kr;
+    double gamma_w = compute_gamma(Lambda_w_3d, Kr_diag, damping_factor_r);
+    Eigen::MatrixXd Br = gamma_w * Kr;
 
     // Calculate moment
-    Eigen::VectorXd m = Kr * u_0 * theta_0- Br * omega;
+    Eigen::VectorXd m = Kr * u_0 * theta_0 - Br * omega;
 
     // Convert to torques
     Eigen::VectorXd tau_rotation = J_w.transpose() * m;
@@ -819,19 +867,24 @@ void MyLBRClient::runStreamerThread() {
     try {
         // Create or open shared memory
         boost::interprocess::shared_memory_object shm(
-        boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
+            boost::interprocess::open_or_create, "SharedMemory_AVP_new", boost::interprocess::read_write);
 
         // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
         // New: 6 * 16 doubles + ready flag 8 bytes = 6 * 16 * sizeof(double) + sizeof(int64_t)
+        // 18 doubles (16 for 4x4 matrix + 2 flags) * 8 + 8 bytes for version flag = 152
         shm.truncate(1 * 17 * sizeof(double) + sizeof(int64_t));
+
 
         // Map the shared memory
         boost::interprocess::mapped_region region(shm, boost::interprocess::read_write);
 
         // Define pointers based on shared memory layout
-        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address());                                                         // First 8 bytes
-        double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                 // First 4x4 matrix [0, :, :]
-        bool* flag = reinterpret_cast<bool*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + sizeof(double) * 16);                                                                                           // Bool if fingers are closed
+        int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
+        double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                // First 4x4 matrix [0, :, :]
+
+        int64_t* flag = reinterpret_cast<int64_t*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + sizeof(double) * 16);
+        std::cout << "Flag value: " << *flag << std::endl;
+          
 
         // Wait for Python to initialize
         while (*ready_flag == -1) {
@@ -848,7 +901,8 @@ void MyLBRClient::runStreamerThread() {
                 dataMutex.lock();
 
                 matrix_rw = matrix_data_rw;
-                flag_hand = flag;
+                flag_hand = (*flag != 0);
+
 
                 dataMutex.unlock();
 

@@ -52,7 +52,8 @@ or otherwise, without the prior written consent of KUKA Roboter GmbH.
 
 #include <Eigen/Dense>
 
-#include "qbrobotics_research_api/qbsofthand_research_api.h"
+//#include "qbrobotics_research_api/qbsofthand_research_api.h"
+#include "/home/newman_lab/Desktop/Explicit-FRI/Libraries/qbHand/api-test-shr-v7/include/qbrobotics_research_api/qbsofthand_research_api.h"
 
 namespace py = pybind11;
 
@@ -119,7 +120,7 @@ private:
     void startPythonScript();
 
     double* matrix_rw;
-    bool* flag_hand;
+    bool flag_hand;
 
     Eigen::MatrixXd H_avp_rw_ini;
     Eigen::MatrixXd R_avp_rw_ini;
@@ -201,7 +202,6 @@ private:
     Eigen::VectorXd f_ext;
     Eigen::VectorXd m_ext;
    
-
     void forceSensorThread();
 
     boost::thread ftsThread;
