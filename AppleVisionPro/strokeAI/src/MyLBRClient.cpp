@@ -784,29 +784,29 @@ void MyLBRClient::command()
     // ************************************************************
     // Write data in a file 
 
-    // // Buffer binary data
-    // buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
-    // buffer.write(reinterpret_cast<const char*>(f_ext.data()), sizeof(double) * f_ext.size());
-    // buffer.write(reinterpret_cast<const char*>(m_ext.data()), sizeof(double) * m_ext.size());
-    // buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
-    // buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
-    // buffer.write(reinterpret_cast<const char*>(u.data()), sizeof(double) * u.size());
-    // buffer.write(reinterpret_cast<const char*>(&theta), sizeof(double));  
-    // buffer.write(reinterpret_cast<const char*>(u_0.data()), sizeof(double) * u.size());
-    // buffer.write(reinterpret_cast<const char*>(&theta_0), sizeof(double)); 
+    // Buffer binary data
+    buffer.write(reinterpret_cast<const char*>(&currentTime), sizeof(currentTime));
+    buffer.write(reinterpret_cast<const char*>(f_ext.data()), sizeof(double) * f_ext.size());
+    buffer.write(reinterpret_cast<const char*>(m_ext.data()), sizeof(double) * m_ext.size());
+    buffer.write(reinterpret_cast<const char*>(p.data()), sizeof(double) * p.size());
+    buffer.write(reinterpret_cast<const char*>(p_0.data()), sizeof(double) * p_0.size());
+    buffer.write(reinterpret_cast<const char*>(u.data()), sizeof(double) * u.size());
+    buffer.write(reinterpret_cast<const char*>(&theta), sizeof(double));  
+    buffer.write(reinterpret_cast<const char*>(u_0.data()), sizeof(double) * u.size());
+    buffer.write(reinterpret_cast<const char*>(&theta_0), sizeof(double)); 
 
-    // // Additionally for NLS
-    // buffer.write(reinterpret_cast<const char*>(dx.data()), sizeof(double) * dx.size());
-    // buffer.write(reinterpret_cast<const char*>(Lambda_v_3d.data()), sizeof(double) * Lambda_v_3d.size());
-    // buffer.write(reinterpret_cast<const char*>(omega.data()), sizeof(double) * omega.size());
-    // buffer.write(reinterpret_cast<const char*>(Lambda_w_3d.data()), sizeof(double) * Lambda_w_3d.size());
+    // Additionally for NLS
+    buffer.write(reinterpret_cast<const char*>(dx.data()), sizeof(double) * dx.size());
+    buffer.write(reinterpret_cast<const char*>(Lambda_v_3d.data()), sizeof(double) * Lambda_v_3d.size());
+    buffer.write(reinterpret_cast<const char*>(omega.data()), sizeof(double) * omega.size());
+    buffer.write(reinterpret_cast<const char*>(Lambda_w_3d.data()), sizeof(double) * Lambda_w_3d.size());
 
-    // // Periodic flush to file (e.g., every 1000 iterations)
-    // if (buffer.str().size() > 4096) { // Write every 4KB of data
-    //     File_data.write(buffer.str().c_str(), buffer.str().size());
-    //     buffer.str("");  // Clear buffer
-    //     buffer.clear();
-    // }
+    // Periodic flush to file (e.g., every 1000 iterations)
+    if (buffer.str().size() > 4096) { // Write every 4KB of data
+        File_data.write(buffer.str().c_str(), buffer.str().size());
+        buffer.str("");  // Clear buffer
+        buffer.clear();
+    }
 
 
     // ************************************************************
