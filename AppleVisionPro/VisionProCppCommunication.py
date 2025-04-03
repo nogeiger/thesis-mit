@@ -3,7 +3,7 @@ import numpy as np
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.31.150.40"
+avp_ip = "10.29.142.181"
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 finger_closed = True
@@ -39,10 +39,10 @@ try:
 
         if r['right_pinch_distance'] < 0.01:
             finger_closed = False 
-            print("finger closed")
+            #print("finger closed")
         elif r['right_pinch_distance'] > 0.12:
             finger_closed = True
-            print("finger opened")
+            #print("finger opened")
 
 
         # Prepare data for shared memory

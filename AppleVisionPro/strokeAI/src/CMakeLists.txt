@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.2)
 
-project(avp_stream)
+project(strokeAI)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -17,15 +17,19 @@ find_package(Python3 REQUIRED COMPONENTS Development)
 find_package(Qt5 REQUIRED COMPONENTS Core Concurrent)
 
 # Include directories
+set(HAND_INCLUDE_DIR "/home/newman_lab/Desktop/Explicit-FRI/Libraries/qbHand/api-test-shr-v7/include")
+
 set(includeDir
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/Explicit-cpp/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/myFRIClient/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/Explicit-cpp/Eigen
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/FTSensor/include
-  ${Python3_INCLUDE_DIRS} # Include Python headers dynamically
-  /home/newman_lab/.local/lib/python3.10/site-packages/pybind11/include # Add Pybind11 here
+  /home/newman_lab/Desktop/Explicit-FRI/Libraries/Explicit-cpp/include
+  /home/newman_lab/Desktop/Explicit-FRI/Libraries/myFRIClient/include
+  /home/newman_lab/Desktop/Explicit-FRI/Libraries/Explicit-cpp/Eigen
+  /home/newman_lab/Desktop/Explicit-FRI/Libraries/FTSensor/include
+  ${Python3_INCLUDE_DIRS}
+  /home/newman_lab/.local/lib/python3.10/site-packages/pybind11/include
+  ${HAND_INCLUDE_DIR}
 )
+
 include_directories(${includeDir})
 
 # Make all source files visible in the IDE
@@ -43,6 +47,8 @@ set(EXPLICIT_CPP_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FR
 #/home/newman_lab/Desktop/noah_repo/Explicit-FRI/Libraries/Explicit-cpp/lib/libExplicit-cpp.so
 set(FRI_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/myFRIClient/lib/libFRIClient.a" CACHE STRING "FRI library")
 set(SENSOR_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Explicit-FRI/Libraries/FTSensor/lib/libFTSensor.so" CACHE STRING "FTSensor library")
+set(SERIAL_LIBRARY "/home/newman_lab/Desktop/Explicit-FRI/Libraries/qbHand/api-test-shr-v7/libs/libSerial.a" CACHE STRING "Serial library")
+set(HAND_LIBRARY "/home/newman_lab/Desktop/Explicit-FRI/Libraries/qbHand/api-test-shr-v7/libs/libqbrobotics_driver.a" CACHE STRING "Hand library")
 
 set(linkLibraries
   ${EXPLICIT_CPP_LIBRARY}
@@ -50,10 +56,12 @@ set(linkLibraries
   ${SENSOR_LIBRARY}
   ${Boost_LIBRARIES}
   Python3::Python # Link Python libraries dynamically
+  ${HAND_LIBRARY}         # Link this first — it depends on serial
+  ${SERIAL_LIBRARY}       # Then this — satisfies undefined symbols
 )
 
 # Link libraries to the executable
-target_link_libraries(${PROJECT_NAME} PRIVATE ${linkLibraries})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${linkLibraries} stdc++fs)
 target_link_libraries(${PROJECT_NAME} PRIVATE Qt5::Core Qt5::Concurrent)
 
 # The output directory
@@ -76,3 +84,6 @@ install(TARGETS ${PROJECT_NAME}
         ARCHIVE DESTINATION ${libOutputDir}
         RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/application
 )
+
+# Ensure executable goes to build/
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

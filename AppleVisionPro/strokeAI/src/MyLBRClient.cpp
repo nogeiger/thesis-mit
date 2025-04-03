@@ -99,13 +99,13 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // qInitial[5] = 43.03 * M_PI/180;
     // qInitial[6] = 4.14 * M_PI/180;
 
-    qInitial[0] = -46.88 * M_PI/180;
-    qInitial[1] = 91.03 * M_PI/180;
-    qInitial[2] = 3.21 * M_PI/180;
-    qInitial[3] = -53.77 * M_PI/180;
-    qInitial[4] = 115.35 * M_PI/180;
-    qInitial[5] = 61.21 * M_PI/180;
-    qInitial[6] = 66.59 * M_PI/180;
+    qInitial[0] = -11.46 * M_PI/180;
+    qInitial[1] = 95.12 * M_PI/180;
+    qInitial[2] = 6.37 * M_PI/180;
+    qInitial[3] = -66.35 * M_PI/180;
+    qInitial[4] = 149.72 * M_PI/180;
+    qInitial[5] = 70.83 * M_PI/180;
+    qInitial[6] = 44.49 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
     myLBR = new iiwa14( 1, "Trey");
@@ -140,8 +140,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    //pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );
-    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );      // with force sensor
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.0 );          // end-effector position
+    //pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );      // with force sensor
+    // pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );      // center of the hand palm
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
@@ -239,22 +240,22 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
 
     // Get the current timestamp and create the filename
-    // std::time_t now = std::time(nullptr);
-    // std::tm* localTime = std::localtime(&now);
+    std::time_t now = std::time(nullptr);
+    std::tm* localTime = std::localtime(&now);
     
-    // char buffer[50];
-    // std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", localTime); // Format: YYYY-MM-DD_HH-MM-SS
+    char buffer[50];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", localTime); // Format: YYYY-MM-DD_HH-MM-SS
     
-    // std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/RobotData_Circle_" 
-    //                         + std::string(buffer) + ".bin";
+    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/DataHand_" 
+                            + std::string(buffer) + ".bin";
     
-    // // Open a uniquely named binary file
-    // File_data.open(filename, std::ios::binary);
-    // if (!File_data) {
-    //     std::cerr << "Error opening file for writing: " << filename << std::endl;
-    // } else {
-    //     std::cout << "File successfully opened: " << filename << std::endl;
-    // }
+    // Open a uniquely named binary file
+    File_data.open(filename, std::ios::binary);
+    if (!File_data) {
+        std::cerr << "Error opening file for writing: " << filename << std::endl;
+    } else {
+        std::cout << "File successfully opened: " << filename << std::endl;
+    }
     
 
     // ************************************************************
@@ -305,9 +306,9 @@ MyLBRClient::~MyLBRClient()
 
     delete this->ftSensor;
 
-    // if (File_data.is_open()) {
-    //     File_data.close();
-    // }
+    if (File_data.is_open()) {
+        File_data.close();
+    }
 
     // Shut down hand gracefully
     for (const auto& port : used_ports_) {
@@ -454,9 +455,13 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
-    R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
-    R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)
-    R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
+    //R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
+    //R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)         
+    //R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
+
+    R_corrected.col(0) = R_avp_rw.col(1);           // X gets Y
+    R_corrected.col(1) = -R_avp_rw.col(2);           // Y becomes Z (inverted)         
+    R_corrected.col(2) = -R_avp_rw.col(0);          // Z becomes X (inverted)
 
     R_avp_rw = R_corrected;
 
@@ -469,7 +474,12 @@ void MyLBRClient::command()
     R_avp_rw = ( R_avp_rw + R_avp_rw_prev + R_avp_rw_prev_prev ) / 3;
 
     // Positon of knuckle with respect to avp
-    p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
+    //p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
+    p_avp_rw = H_avp_rw.transpose().block<3,1>(0,3)
+             .cwiseProduct(Eigen::Vector3d(-1, -1, 1));
+
+
+
 
     // A simple filter for the translation
     if( currentTime < sampleTime )
@@ -500,48 +510,6 @@ void MyLBRClient::command()
     // Convert to robot base coordinates
     f_ext = R * f_ext_ee;
     m_ext = R * m_ext_ee;
-
-
-    // // ************************************************************
-    // // Move Hand
-
-    // bool button_pressed = robotState().getBooleanIOValue("MediaFlange.UserButton");
-
-    // cout << "flag_hand: " << flag_hand << endl;
-
-    // // --- Button logic: Toggle state on rising edge ---
-    // if (button_pressed && !last_button_state) {
-    //     hand_open = !hand_open;
-    //     std::cout << "[Hand] Button Pressed! New state: " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
-    // }
-    // last_button_state = button_pressed;
-    
-    // // --- flag_hand logic: Override if needed ---
-    // if (flag_hand && hand_open) {
-    //     hand_open = false;
-    //     std::cout << "[Hand] Closing due to flag_hand=true" << std::endl;
-    // } else if (!flag_hand && !hand_open) {
-    //     hand_open = true;
-    //     std::cout << "[Hand] Opening due to flag_hand=false" << std::endl;
-    // }
-    
-    // // --- Apply hand state only if changed ---
-    // static bool last_hand_state = !hand_open; // Force first update
-    // if (hand_open != last_hand_state) {
-    //     for (const auto& id : device_ids_) {
-    //         if (id.id == 0 || id.id == 120) continue;
-    
-    //         auto hand = soft_hands_.at(id.id);
-    //         std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{15000};
-    
-    //         hand->setMotorStates(true);
-    //         hand->setControlReferences(control_refs);
-    //         std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
-    //     }
-    //     last_hand_state = hand_open;
-    // }
-
-
 
     // ************************************************************
     // Move Hand (flag_hand only)
@@ -773,9 +741,10 @@ void MyLBRClient::command()
     // ************************************************************
     // Control torque
     tau_motion = tau_translation + tau_rotation + (N * tau_q);
+    //tau_motion = tau_rotation + (N * tau_q);
 
     // Comment out for only gravity compensation
-    //    tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
+        //tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
 
     // Include joint limits
     tau_motion = myLBR->addIIWALimits( q, dq, M, tau_motion, 0.004 );
