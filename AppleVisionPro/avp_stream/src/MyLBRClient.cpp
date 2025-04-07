@@ -132,7 +132,8 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );
+    // pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.0 );
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );

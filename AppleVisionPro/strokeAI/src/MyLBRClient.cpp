@@ -238,17 +238,20 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Store data
     // ************************************************************
 
+    std::string subject_id = "s1";        // Change per subject
+    std::string movement = "lift";        // Options: lift, oop, adl
+    std::string condition = "p";          // Options: p, a, m
 
-    // Get the current timestamp and create the filename
+    // Create the filename using the custom naming convention
+
     std::time_t now = std::time(nullptr);
     std::tm* localTime = std::localtime(&now);
-    
-    char buffer[50];
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", localTime); // Format: YYYY-MM-DD_HH-MM-SS
-    
-    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/DataHand_" 
-                            + std::string(buffer) + ".bin";
-    
+    char time_buffer[50];
+    std::strftime(time_buffer, sizeof(time_buffer), "_%Y-%m-%d_%H-%M-%S", localTime); 
+
+    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/" + subject_id + "_" + movement + "_" + condition + "_"
+                             + time_buffer + ".bin";
+
     // Open a uniquely named binary file
     File_data.open(filename, std::ios::binary);
     if (!File_data) {
