@@ -91,13 +91,21 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     /** Initialization */
     // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    qInitial[0] = 5.59 * M_PI/180;
-    qInitial[1] = 50.76 * M_PI/180;
-    qInitial[2] = 0.04 * M_PI/180;
-    qInitial[3] = -86.34 * M_PI/180;
-    qInitial[4] = -3.49 * M_PI/180;
-    qInitial[5] = 40.25 * M_PI/180;
-    qInitial[6] = 92.61 * M_PI/180;
+    // qInitial[0] = -8.87 * M_PI/180;
+    // qInitial[1] = 60.98 * M_PI/180;
+    // qInitial[2] = 17.51 * M_PI/180;
+    // qInitial[3] = -79.85 * M_PI/180;
+    // qInitial[4] = -24.13 * M_PI/180;
+    // qInitial[5] = 43.03 * M_PI/180;
+    // qInitial[6] = 4.14 * M_PI/180;
+
+    qInitial[0] = -11.46 * M_PI/180;
+    qInitial[1] = 95.12 * M_PI/180;
+    qInitial[2] = 6.37 * M_PI/180;
+    qInitial[3] = -66.35 * M_PI/180;
+    qInitial[4] = 149.72 * M_PI/180;
+    qInitial[5] = 70.83 * M_PI/180;
+    qInitial[6] = 44.49 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
     myLBR = new iiwa14( 1, "Trey");
@@ -132,7 +140,9 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     M = Eigen::MatrixXd::Zero( 7, 7 );
     M_inv = Eigen::MatrixXd::Zero( 7, 7 );
 
-    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );
+    pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.0 );          // end-effector position
+    //pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.11 );      // with force sensor
+    // pointPosition = Eigen::Vector3d( 0.0, 0.0, 0.16 );      // center of the hand palm
 
     H = Eigen::MatrixXd::Zero( 4, 4 );
     R = Eigen::MatrixXd::Zero( 3, 3 );
@@ -222,6 +232,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     // # definitions can be found here: https://github.com/Improbable-AI/VisionProTeleop
     matrix_rw = new double[16];                     // wrist
+    flag_hand = false;
 
     // ************************************************************
     // Store data
@@ -235,7 +246,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     char buffer[50];
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", localTime); // Format: YYYY-MM-DD_HH-MM-SS
     
-    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/RobotData_Circle_" 
+    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/DataHand_" 
                             + std::string(buffer) + ".bin";
     
     // Open a uniquely named binary file
@@ -257,14 +268,19 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     f_ext = Eigen::VectorXd::Zero( 3 );
     m_ext = Eigen::VectorXd::Zero( 3 );
 
-
     AtiForceTorqueSensor ftSensor("172.31.1.1");
     
-    // Start threading for force sensor
+    // // Start threading for force sensor
     mutexFTS.unlock();
     boost::thread(&MyLBRClient::forceSensorThread, this).detach();
 
     printf( "Sensor Activated. \n\n" );
+
+
+    // ************************************************************
+    // ROBOTIC HAND INITIALIZATION
+    // ************************************************************
+    initializeRoboticHand();
 
     // ************************************************************
     // Initial print
@@ -287,10 +303,16 @@ MyLBRClient::~MyLBRClient()
 
     boost::interprocess::shared_memory_object::remove("SharedMemory_AVP");
     delete myLBR;
+
     delete this->ftSensor;
 
     if (File_data.is_open()) {
         File_data.close();
+    }
+
+    // Shut down hand gracefully
+    for (const auto& port : used_ports_) {
+        comm_handler_->closeSerialPort(port);
     }
 
 }
@@ -433,16 +455,13 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
+    //R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
+    //R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)         
+    //R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
 
-    // // Old code for reference
-    // R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
-    // R_corrected.col(1) = R_avp_rw.col(1);       // Z becomes Y (inverted)
-    // R_corrected.col(2) = R_avp_rw.col(2);        // Y becomes Z
-
-    // // New code for reference (x-axis is mirrored)
-    R_corrected.col(0) = R_avp_rw.col(2);           // X becomes Z
-    R_corrected.col(1) = R_avp_rw.col(0);           // Y becomes X         
-    R_corrected.col(2) = -R_avp_rw.col(1);          // Z becomes Y (inverted)
+    R_corrected.col(0) = R_avp_rw.col(1);           // X gets Y
+    R_corrected.col(1) = -R_avp_rw.col(2);           // Y becomes Z (inverted)         
+    R_corrected.col(2) = -R_avp_rw.col(0);          // Z becomes X (inverted)
 
     R_avp_rw = R_corrected;
 
@@ -455,7 +474,12 @@ void MyLBRClient::command()
     R_avp_rw = ( R_avp_rw + R_avp_rw_prev + R_avp_rw_prev_prev ) / 3;
 
     // Positon of knuckle with respect to avp
-    p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
+    //p_avp_rw = H_avp_rw.transpose().block< 3, 1 >( 0, 3 );
+    p_avp_rw = H_avp_rw.transpose().block<3,1>(0,3)
+             .cwiseProduct(Eigen::Vector3d(-1, -1, 1));
+
+
+
 
     // A simple filter for the translation
     if( currentTime < sampleTime )
@@ -487,6 +511,37 @@ void MyLBRClient::command()
     f_ext = R * f_ext_ee;
     m_ext = R * m_ext_ee;
 
+    // ************************************************************
+    // Move Hand (flag_hand only)
+
+    bool flag_override = false;
+
+    // --- Apply flag_hand logic ---
+    if (flag_hand && !hand_open) {
+        hand_open = true;
+        flag_override = true;
+        std::cout << "[Hand] Opening due to flag_hand=true" << std::endl;
+    } else if (!flag_hand && hand_open) {
+        hand_open = false;
+        flag_override = true;
+        std::cout << "[Hand] Closing due to flag_hand=false" << std::endl;
+    }
+
+    // --- Apply new hand command only if needed ---
+    if (flag_override) {
+        for (const auto& id : device_ids_) {
+            if (id.id == 0 || id.id == 120) continue;
+
+            auto hand = soft_hands_.at(id.id);
+            std::vector<int16_t> control_refs = hand_open ? std::vector<int16_t>{0} : std::vector<int16_t>{13000};
+
+            hand->setMotorStates(true);
+            hand->setControlReferences(control_refs);
+
+            std::cout << "[Hand] Device " << (int)id.id << " set to " << (hand_open ? "OPEN" : "CLOSE") << std::endl;
+        }
+    }
+
 
     // ************************************************************
     // Get robot measurements
@@ -509,13 +564,11 @@ void MyLBRClient::command()
     // Calculate kinematics and dynamics
 
     // Transformation and Rotation Matrix
-    // H = myLBR->getForwardKinematics( q );
     H = myLBR->getForwardKinematics( q, 7, pointPosition );
     R = H.block< 3, 3 >( 0, 0 );
     p = H.block< 3, 1 >( 0, 3 );
 
     // Transform rotations to quaternions
-    //Eigen::Quaterniond Q(R);
     Eigen::Matrix3d R_fixed = R.block<3,3>(0,0); // Ensure it's 3x3
     Eigen::Quaterniond Q(R_fixed);
     Q.normalize();
@@ -557,7 +610,6 @@ void MyLBRClient::command()
     }
 
     // Jacobian, translational and rotation part
-    // J = myLBR->getHybridJacobian( q );
     J = myLBR->getHybridJacobian( q, pointPosition );
     Eigen::MatrixXd J_v = J.block(0, 0, 3, 7);
     Eigen::MatrixXd J_w = J.block(3, 0, 3, 7);
@@ -650,8 +702,8 @@ void MyLBRClient::command()
     double damping_factor_v = 0.7;
     Eigen::Vector3d Kp_diag = Kp.diagonal();
     Eigen::Matrix3d Lambda_v_3d = Lambda_v;
-    double alpha_v = compute_alpha(Lambda_v_3d, Kp_diag, damping_factor_v);
-    Eigen::MatrixXd Bp = alpha_v * Kp;
+    double gamma_v = compute_gamma(Lambda_v_3d, Kp_diag, damping_factor_v);
+    Eigen::MatrixXd Bp = gamma_v * Kp;
 
     // Calculate force
     Eigen::VectorXd f = Kp * del_p - Bp * dx;
@@ -668,11 +720,11 @@ void MyLBRClient::command()
     double damping_factor_r = 0.7;
     Eigen::Vector3d Kr_diag = Kr.diagonal();
     Eigen::Matrix3d Lambda_w_3d = Lambda_w;
-    double alpha_w = compute_alpha(Lambda_w_3d, Kr_diag, damping_factor_r);
-    Eigen::MatrixXd Br = alpha_w * Kr;
+    double gamma_w = compute_gamma(Lambda_w_3d, Kr_diag, damping_factor_r);
+    Eigen::MatrixXd Br = gamma_w * Kr;
 
     // Calculate moment
-    Eigen::VectorXd m = Kr * u_0 * theta_0- Br * omega;
+    Eigen::VectorXd m = Kr * u_0 * theta_0 - Br * omega;
 
     // Convert to torques
     Eigen::VectorXd tau_rotation = J_w.transpose() * m;
@@ -691,7 +743,7 @@ void MyLBRClient::command()
     tau_motion = tau_translation + tau_rotation + (N * tau_q);
 
     // Comment out for only gravity compensation
-    // tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
+        //tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
 
     // Include joint limits
     tau_motion = myLBR->addIIWALimits( q, dq, M, tau_motion, 0.004 );
@@ -716,8 +768,6 @@ void MyLBRClient::command()
     buffer.write(reinterpret_cast<const char*>(Lambda_v_3d.data()), sizeof(double) * Lambda_v_3d.size());
     buffer.write(reinterpret_cast<const char*>(omega.data()), sizeof(double) * omega.size());
     buffer.write(reinterpret_cast<const char*>(Lambda_w_3d.data()), sizeof(double) * Lambda_w_3d.size());
-
-
 
     // Periodic flush to file (e.g., every 1000 iterations)
     if (buffer.str().size() > 4096) { // Write every 4KB of data
@@ -800,6 +850,10 @@ void MyLBRClient::runStreamerThread() {
         int64_t* ready_flag = reinterpret_cast<int64_t*>(region.get_address()); // First 8 bytes
         double* matrix_data_rw = reinterpret_cast<double*>(static_cast<char*>(region.get_address()) + sizeof(int64_t));                // First 4x4 matrix [0, :, :]
 
+        int64_t* flag = reinterpret_cast<int64_t*>(static_cast<char*>(region.get_address()) + sizeof(int64_t) + sizeof(double) * 16);
+        std::cout << "Flag value: " << *flag << std::endl;
+          
+
         // Wait for Python to initialize
         while (*ready_flag == -1) {
             std::cout << "Waiting for Python to initialize...  \n\n" << std::endl;
@@ -815,6 +869,8 @@ void MyLBRClient::runStreamerThread() {
                 dataMutex.lock();
 
                 matrix_rw = matrix_data_rw;
+                flag_hand = (*flag != 0);
+
 
                 dataMutex.unlock();
 
@@ -885,7 +941,7 @@ void MyLBRClient::forceSensorThread()
 * \brief Function to compute damping factor, applied to stiffness matrix
 *
 */
-double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lam, Eigen::Vector3d& k_t, double damping_factor)
+double MyLBRClient::compute_gamma(Eigen::Matrix3d& Lam, Eigen::Vector3d& k_t, double damping_factor)
 {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(Lam);
     Eigen::Matrix3d U = solver.eigenvectors();
@@ -907,9 +963,9 @@ double MyLBRClient::compute_alpha(Eigen::Matrix3d& Lam, Eigen::Vector3d& k_t, do
     Eigen::Matrix3d D = Eigen::Matrix3d::Identity() * damping_factor;
     Eigen::Matrix3d b_t = sqrt_Lambda * D * sqrt_k_t + sqrt_k_t * D * sqrt_Lambda;
 
-    // Compute alpha
-    double alpha = (2.0 * b_t.trace()) / k_t.sum();
-    return alpha;
+    // Compute gamma
+    double gamma = (2.0 * b_t.trace()) / k_t.sum();
+    return gamma;
 }
 
 
@@ -924,4 +980,50 @@ Eigen::MatrixXd MyLBRClient::getLambdaLeastSquares(Eigen::MatrixXd M, Eigen::Mat
 
     return Lam;
 
+}
+
+
+/**
+* \brief Function to initialize the robotic hand
+*/
+void MyLBRClient::initializeRoboticHand()
+{
+    hand_open = true;
+    last_button_state = false;
+
+    comm_handler_ = std::make_shared<qbrobotics_research_api::CommunicationLegacy>();
+    std::vector<serial::PortInfo> serial_ports;
+
+    if (comm_handler_->listSerialPorts(serial_ports) < 0) {
+        std::cerr << "[qbHand] No serial ports found!" << std::endl;
+        return;
+    }
+
+    for (const auto& port : serial_ports) {
+        std::vector<qbrobotics_research_api::Communication::ConnectedDeviceInfo> ids;
+
+        if (comm_handler_->openSerialPort(port.serial_port) >= 0) {
+            used_ports_.insert(port.serial_port);
+
+            if (comm_handler_->listConnectedDevices(port.serial_port, ids) >= 0) {
+                std::cout << "[Init] Devices found on port: " << port.serial_port << std::endl;
+
+                for (const auto& id : ids) {
+                    if (id.id == 0 || id.id == 120) continue;
+
+                    auto hand = std::make_shared<qbrobotics_research_api::qbSoftHandLegacyResearch>(
+                        comm_handler_, "SoftHand", port.serial_port, id.id);
+
+                    soft_hands_.insert({id.id, hand});
+                    device_ids_.push_back(id);
+
+                    std::vector<int16_t> open_ref = {0};
+                    hand->setMotorStates(true);
+                    hand->setControlReferences(open_ref);
+
+                    std::cout << "  [Init] Device ID " << (int)id.id << " initialized and opened." << std::endl;
+                }
+            }
+        }
+    }
 }

@@ -43,8 +43,8 @@ for i = 1:num_tests
     %%%%%%%%%%%%%%%%%%%%%
     % Translational Stiffness
     k_t_true = k_t_true_samples(i, :)';
-    alpha_t_true = compute_alpha(Lambda_t, k_t_true);
-    f_ext = diag(k_t_true) * (delta_p - alpha_t_true * dot_p);
+    gamma_t_true = compute_alpha(Lambda_t, k_t_true);
+    f_ext = diag(k_t_true) * (delta_p - gamma_t_true * dot_p);
 
     % Estimate stiffness using NLS
     k_t_estimated = estimate_stiffness_nls_translation(f_ext, delta_p, dot_p, Lambda_t);
@@ -54,8 +54,8 @@ for i = 1:num_tests
     errors_t(i, :) = abs(k_t_estimated - k_t_true)';
 
     % Compute expected Br using the ground truth
-    alpha_r_true = compute_alpha(Lambda_r, k_r_true);
-    B_r_true = alpha_r_true * diag(k_r_true);
+    gamma_r_true = compute_alpha(Lambda_r, k_r_true);
+    B_r_true = gamma_r_true * diag(k_r_true);
 
     % Compute external moment
     m_ext = (diag(k_r_true) * u_0 * theta) - (B_r_true * omega);
@@ -138,7 +138,7 @@ end
 %% Residual function for translation
 function residuals = residual_function_translation(k_t, f_ext, delta_p, dot_p, Lambda)
 % Compute damping parameter
-alpha_t = compute_alpha(Lambda, k_t);
+alpha_t = compute_gamma(Lambda, k_t);
 
 % Compute estimated force
 f_est = diag(k_t) * (delta_p - alpha_t * dot_p);
@@ -151,7 +151,7 @@ end
 %% Residual function for rotation
 function residuals = residual_function_rotation(k_r, m_ext, u0, theta, omega, Lambda)
 % Compute damping parameter
-alpha_r = compute_alpha(Lambda, k_r);
+alpha_r = compute_gamma(Lambda, k_r);
 
 % Reformulated moment equation
 m_est = diag(k_r) * (u0 * theta) - (alpha_r * diag(k_r) * omega);
@@ -162,7 +162,7 @@ end
 
 
 %% Compute damping parameter
-function alpha = compute_alpha(Lambda, k, damping_factor)
+function gamma = compute_gamma(Lambda, k, damping_factor)
 if nargin < 3, damping_factor = 0.7; end
 
 % Eigenvalue decomposition
@@ -180,5 +180,5 @@ D = eye(3) * damping_factor;
 b_t = sqrt_Lambda * D * sqrt_k + sqrt_k * D * sqrt_Lambda;
 
 % Compute alpha
-alpha = (2 * trace(b_t)) / sum(k);
+gamma = (2 * trace(b_t)) / sum(k);
 end

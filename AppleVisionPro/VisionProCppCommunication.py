@@ -1,19 +1,16 @@
 import time
 import numpy as np
-import signal
-import sys
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.29.188.233"
-
+avp_ip = "10.31.130.110"
 s = VisionProStreamer(ip=avp_ip, record=True)
 
-
+finger_closed = True
 # Define shared memory parameters
-SHM_NAME = "SharedMemory_AVP"
+SHM_NAME = "SharedMemory_AVP_new"
 #SHM_SIZE = 8 + 3* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
-SHM_SIZE = 8 + 1* 16 * 8  # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix)
+SHM_SIZE = 8 + 1* 16 * 8  + 8 # 8 bytes for Ready flag + 6 * 16 doubles (4x4 matrix) + 8 for booleans
 
 # Create shared memory
 try:
@@ -25,14 +22,14 @@ except FileExistsError:
 
 # Define shared memory regions
 version = np.ndarray((1,), dtype=np.int64, buffer=shm.buf[:8])  # Ready flag
-data = np.ndarray((1, 4, 4), dtype=np.float64, buffer=shm.buf[8:])  # 4x4 matrix
-
+data = np.ndarray((1, 17), dtype=np.float64, buffer=shm.buf[8:])  # 16 + 2
+#data = np.ndarray((1, 16), dtype=np.float64, buffer=shm.buf[8:])  # 16 + 2
 # Initialization
 version[0] = -1  # Indicate that Python is initializing
 print("Python initialized shared memory. Waiting for C++ to start...")
 
 # Set flag to 0 to signal readiness
-time.sleep(1)  # Simulate initialization delay
+time.sleep(1)
 version[0] = 0
 print("Python is ready. Ready flag set to 0.")
 
@@ -40,22 +37,29 @@ try:
     while True:
         r = s.latest  # Get the latest data
 
-        # Collect all data into a single numpy array (data_storage)
-        data_storage = np.array([
-            r['right_wrist'][0],               # data_25
-            #r['right_fingers'][0],         # data_25
-            #r['right_fingers'][10],         # data_10
-            #r['right_fingers'][11],         # data_11
-            #r['right_fingers'][12],         # data_12
-            #r['right_fingers'][13],         # data_13
-            #r['right_fingers'][14],         # data_14
-        ], dtype=np.float64)
+        if r['right_pinch_distance'] < 0.01:
+            finger_closed = False 
+            #print("finger closed")
+        elif r['right_pinch_distance'] > 0.12:
+            finger_closed = True
+            #print("finger opened")
 
-        # Write data to shared memory only if Ready flag is 0
+
+        # Prepare data for shared memory
+        data_storage = np.concatenate([
+            np.array(r['right_wrist'], dtype=np.float64).flatten(),
+            np.array([float(finger_closed)], dtype=np.float64),
+        ])
+        #print("right_wrist: ", r['right_wrist'])
+
+        #finger_closed = True#r['right_pinch_distance'] < 0.01
+        #print("data storage: ", data_storage)
+        #print("matrix data: ", r['right_wrist'])
+
+        # Write data
         if version[0] == 0:
-            data[:] = data_storage 
+            data[0, :] = data_storage
             version[0] = 1  # Set Ready flag to 1
-
 
 except KeyboardInterrupt:
     print("Python: Stopping.")
