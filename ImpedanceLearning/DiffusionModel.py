@@ -7,13 +7,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
-from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN
+from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN, NoisePredictorWithCrossAttention, NoisePredictorTransformerWithCrossAttention
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model, inference_simulation
 from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
 from datetime import datetime
 import gc
 
+np.random.seed(42)
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
@@ -26,23 +27,23 @@ def main():
     # Definition of parameters
     seq_length = 16 #seq len of data
     input_dim = seq_length * 3  # Flattened input dimension
-    hidden_dim = 2048 #FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
+    hidden_dim = 512 #FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 500#00#500#00 #number of epochs
+    num_epochs = 2#500#2#0#500#number of epochs
     learning_rate = 1e-3 #1e-3 FF#learning rate
-    noiseadding_steps = 20 # Number of steps to add noise
+    noiseadding_steps = 20#20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
     noise_with_force = False#True # Set this to True if you want to use forces as the noise
     #if force is used as noise, then force should not be used as input
     if noise_with_force:
             use_forces = False
     beta_start = 0.0001 #for the noise diffusion model
-    beta_end = 0.02 #for the noise diffusion model
+    beta_end = 0.02#0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    early_stop_patience = 75 #for early stopping
+    early_stop_patience = 20 #for early stopping
     save_interval = 20
-    save_path = "save_checkpoints"
+    save_path = "save_checkpoints/TestInference"
     timestamp = datetime.now().strftime("%Y-%"
     "m-%d_%H-%M-%S")
 
@@ -76,9 +77,9 @@ def main():
     normalized_data = normalize_data_per_axis(data, stats)
     normalized_data_application = normalize_data_per_axis(data_application, stats_application)
     # Define split ratios
-    train_ratio = 0.7 
-    val_ratio = 0.2
-    test_ratio = 0.1  
+    train_ratio = 0.8
+    val_ratio = 0.1
+    test_ratio = 0.1
     # Compute split indices
     total_size = len(normalized_data)
     train_split = int(total_size * train_ratio)
@@ -99,14 +100,16 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     application_loader = DataLoader(application_dataset, batch_size=1, shuffle=False)
-    print(f"Total sequences loaded: {len(test_dataset)} for training, {len(test_dataset)} for validation.")
+ 
 
 
     
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_name = "Transformer"
-    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    model_name = "FFWeigth5"
+    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    model = NoisePredictorWithCrossAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    #model = NoisePredictorTransformerWithCrossAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorLSTM(seq_length, hidden_dim, use_forces=use_forces).to(device)
@@ -124,7 +127,7 @@ def main():
             f.write(f"{key}: {value}\n")
 
 
-
+    
     #choose optimizer
     #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
@@ -194,10 +197,13 @@ def main():
     del train_loader, val_loader, train_dataset, val_dataset
     torch.cuda.empty_cache()
 
+
+    
     # Load best model
     best_model_path = os.path.join(save_path, "best_model.pth")
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.to(device)
+    
     print("_____________________________________________")
     print("-----Test model without postprocessing-----")
     test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=False)
@@ -214,7 +220,7 @@ def main():
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
     os.makedirs(save_path_application, exist_ok=True)
 
-
+    
     
     # Number of sequences to process (adjust as needed)
     num_application_sequences = 100#len(application_loader)

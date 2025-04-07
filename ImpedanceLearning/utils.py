@@ -137,11 +137,18 @@ def quaternion_loss(pred_q, target_q, lambda_unit=0.3):
     alpha_error = torch.atan2(torch.sqrt(1 - dot_product_axis**2 + eps), dot_product_axis)
     loss_alpha = torch.mean(alpha_error ** 2)
 
+
     # 4. Unit norm constraint
     unit_loss = torch.mean((torch.norm(pred_q, dim=-1) - 1) ** 2)
 
+
+    #print("loss_q:", loss_q)
+    #print("loss_theta:", loss_theta)
+    #print("loss_alpha:", loss_alpha)
+    #print("unit_loss:", unit_loss)
+
     # Final weighted loss
-    return loss_q + 1* loss_theta + lambda_unit * unit_loss + 10 * loss_alpha
+    return loss_q + 1* loss_theta + lambda_unit * unit_loss + 5 * loss_alpha
   
 
 def loss_function(predicted_noise, actual_noise):

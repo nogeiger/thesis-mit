@@ -5,16 +5,25 @@ from scipy.spatial.transform import Rotation as R
 
 np.random.seed(42)  # for reproducibility - remove this later
 
-#compute alpha
 def compute_alpha(Lambda, k, damping_factor=0.7):
-    k = np.maximum(k, 1e-3)
+    k = np.maximum(k, 1e-3)  # Avoid division by zero
     eigvals, U = np.linalg.eigh(Lambda)
+
+    # Prevent negative eigenvalues due to numerical noise
+    eigvals = np.clip(eigvals, 0.0, None)
     sqrt_Lambda = U @ np.diag(np.sqrt(eigvals)) @ U.T
+
     sqrt_k = np.diag(np.sqrt(k))
     D = np.eye(3) * damping_factor
+
     b_t = sqrt_Lambda @ D @ sqrt_k + sqrt_k @ D @ sqrt_Lambda
-    #print("alpha", (2 * np.trace(b_t)) / np.sum(k))
-    return (2 * np.trace(b_t)) / np.sum(k)
+    alpha = (2 * np.trace(b_t)) / np.sum(k)
+
+    if not np.isfinite(alpha):
+        raise ValueError(f"Non-finite alpha computed. Trace: {np.trace(b_t)}, Sum(k): {np.sum(k)}")
+
+    return alpha
+
 
 # estimation function
 def estimate_stiffness(mode, data, prev_k=None):
@@ -118,14 +127,14 @@ def run_rotation(lambda_matrix, noisy_quaternion_np, clean_quaternion_np, omega_
         #B_r = alpha_r * np.diag(k_r_true)
         #m_ext = np.diag(k_r_true) @ (u0 * theta) - B_r @ omega 
         #print("lambda matrix", lambda_matrix[0][i])
-        Lambda_r = np.diag(lambda_matrix[0][i]) * np.eye(3)
+        Lambda_r = lambda_matrix[0][i]#np.diag(lambda_matrix[0][i]) * np.eye(3)
         k_r_est = estimate_stiffness('rotation', (moment_ext_np[0][i], u, theta, omega_np[0][i], Lambda_r))
 
         #true_stiff[i] = k_r_true
         est_stiff[i] = k_r_est
         #errors[i] = np.abs(k_r_est - k_r_true)
         prev_k_r = k_r_est
-    
+    print("est stiffness rot before mean", est_stiff)
     return np.mean(est_stiff, axis=0)
 
     #print("\n=== Rotation Stiffness Estimation ===")
@@ -165,7 +174,7 @@ def run_translation(lambda_matrix, noisy_pos_np, clean_pos_np, dx_np,f_ext_np):
         #print("dot_p shape",dot_p.shape, "dot_p_np shape",dot_p_np.shape, "dot_p_np used shape", dot_p_np[0][i].shape)
         #print("Lambda_t shape",Lambda_t.shape, "Lambda_t_np shape",Lambda_t_np.shape, "Lambda_t_np used shape", Lambda_t_np[0][i].shape)
         #print("lambda generated",Lambda_t, "lambda loaded",Lambda_t_np[0][i])
-        Lambda_t = np.diag(Lambda_t_np[0][i]) * np.eye(3)
+        Lambda_t = Lambda_t_np[0][i]#np.diag(Lambda_t_np[0][i]) * np.eye(3)
         #print("______________________")
         #print("lambda new", Lambda_t)
         #print("f_ext_np[0][i]",f_ext_np[0][i])
@@ -178,7 +187,7 @@ def run_translation(lambda_matrix, noisy_pos_np, clean_pos_np, dx_np,f_ext_np):
         #k_t_est = estimate_stiffness('translation', (f_ext[0][i], delta_p[0][i], dot_p[0][1], Lambda_t[0][i]))
         est_stiff[i] = k_t_est
         #errors[i] = np.abs(k_t_est - k_t_true)
-        
+    print("est stiffness trans before mean", est_stiff)
     return np.mean(est_stiff, axis=0)
     #print("\n=== Translation Stiffness Estimation ===")
     #print("Mean Error:", np.mean(errors, axis=0))

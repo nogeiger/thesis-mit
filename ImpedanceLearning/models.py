@@ -68,8 +68,68 @@ class NoisePredictorInitial(nn.Module):
         x = self.relu(x)
         x = self.hidden_layer_4(x)
         x = self.relu(x)
+
         predicted_noise = self.output_layer(x)
         return predicted_noise.view(batch_size, seq_length, 7)  # Reshape back to [batch_size, seq_length, 7]
+
+
+class NoisePredictorWithCrossAttention(nn.Module):
+    """
+    Feedforward network with cross-attention fusion for force/moment information.
+    """
+
+    def __init__(self, seq_length, hidden_dim, use_forces=True):
+        super(NoisePredictorWithCrossAttention, self).__init__()
+        self.use_forces = use_forces
+        self.seq_length = seq_length
+
+        # Projections
+        self.input_proj = nn.Linear(7, hidden_dim)  # pos(3) + quat(4)
+        if self.use_forces:
+            self.cond_proj = nn.Linear(6, hidden_dim)  # forces(3) + moments(3)
+
+        # Cross-Attention
+        self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=1, batch_first=True)
+
+        # Feedforward layers (4 layers)
+        self.input_layer = nn.Linear(seq_length * hidden_dim, hidden_dim)
+        self.hidden_layer_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_2 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_3 = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_layer_4 = nn.Linear(hidden_dim, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim, seq_length * 7)
+
+        self.relu = nn.ReLU()
+
+    def forward(self, noisy_pos, noisy_q, forces=None, moment=None):
+        batch_size, seq_length, _ = noisy_pos.shape
+
+        # Project noisy trajectory
+        x = torch.cat((noisy_pos, noisy_q), dim=-1)  # [B, T, 7]
+        x = self.input_proj(x)  # [B, T, H]
+
+        if self.use_forces:
+            cond = torch.cat((forces, moment), dim=-1)  # [B, T, 6]
+            cond = self.cond_proj(cond)  # [B, T, H]
+
+            # Cross-Attention fusion
+            attn_output, _ = self.cross_attention(query=x, key=cond, value=cond)
+            x = x + attn_output  # residual
+
+        # Flatten and process through FF layers
+        x = x.view(batch_size, -1)  # [B, T*H]
+        x = self.input_layer(x)
+        x = self.relu(x)
+        x = self.hidden_layer_1(x)
+        x = self.relu(x)
+        x = self.hidden_layer_2(x)
+        x = self.relu(x)
+        x = self.hidden_layer_3(x)
+        x = self.relu(x)
+        x = self.hidden_layer_4(x)
+        x = self.relu(x)
+        predicted_noise = self.output_layer(x)
+        return predicted_noise.view(batch_size, seq_length, 7)
 
 
 #Transformer
@@ -124,6 +184,56 @@ class NoisePredictorTransformer(nn.Module):
         x = self.fc1(x)
         x = self.relu(x)
         predicted_trajectory = self.fc2(x)  # Shape: [batch_size, seq_length, 7]
+
+        return predicted_trajectory
+    
+#Transformer with cross attention and pos embedding
+class NoisePredictorTransformerWithCrossAttention(nn.Module):
+    def __init__(self, seq_length, hidden_dim, num_heads=8, num_layers=4, use_forces=True):
+        super(NoisePredictorTransformerWithCrossAttention, self).__init__()
+        self.use_forces = use_forces
+        self.seq_length = seq_length
+
+        # Input projection for trajectory (pos + quat)
+        self.traj_embedding = nn.Linear(7, hidden_dim)
+        self.positional_encoding = nn.Parameter(torch.zeros(1, seq_length, hidden_dim))
+
+        if self.use_forces:
+            # Conditioning projection for forces + moments
+            self.cond_proj = nn.Linear(6, hidden_dim)
+            self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, batch_first=True)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Output layers
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_dim // 2, 7)
+
+    def forward(self, noisy_pos, noisy_q, forces=None, moment=None):
+        batch_size, seq_length, _ = noisy_pos.shape
+
+        # Embed trajectory
+        x = torch.cat((noisy_pos, noisy_q), dim=-1)  # [B, T, 7]
+        x = self.traj_embedding(x) + self.positional_encoding  # [B, T, H]
+
+        if self.use_forces:
+            cond = torch.cat((forces, moment), dim=-1)  # [B, T, 6]
+            cond = self.cond_proj(cond)  # [B, T, H]
+
+            # Cross-attention fusion
+            attn_output, _ = self.cross_attention(query=x, key=cond, value=cond)
+            x = x + attn_output  # residual
+
+        # Pass through Transformer Encoder
+        x = self.transformer(x)  # [B, T, H]
+
+        # Decode
+        x = self.fc1(x)
+        x = self.relu(x)
+        predicted_trajectory = self.fc2(x)  # [B, T, 7]
 
         return predicted_trajectory
 

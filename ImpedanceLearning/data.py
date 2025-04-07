@@ -200,7 +200,7 @@ def load_robot_data(folder_path, seq_length, use_overlap=True):
         list: List of sample dictionaries with consistent keys and -9999.0 for missing fields.
     """
     all_data = []
-    stride = 10 if use_overlap else seq_length  # Overlap control
+    stride = 5 if use_overlap else seq_length  # Overlap control
     
     for filename in os.listdir(folder_path):
         if filename.endswith(".txt"):

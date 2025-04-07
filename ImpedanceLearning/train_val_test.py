@@ -96,7 +96,8 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
 
-
+            #print("pos loss", predicted_noise[:,:,0:3])
+            #print("q loss", 10* predicted_noise[:,:,3:])
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
             #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
@@ -216,7 +217,7 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_q)
 
             # Calculate loss
-            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -294,7 +295,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
             #Preprocessing of denoise
 
             # Apply smoothing using a moving average filter
-            window_size = 20  # Adjust the window size based on smoothing needs
+            window_size = 8  # Adjust the window size based on smoothing needs
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
             #smoothing for q using slerp with sliding window
             denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
@@ -366,43 +367,27 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         mean_diffs_axis_alpha.append(mean_alpha_error) 
 
 
-        # Create a separate figure for each sample
-        fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))  # Wider figure for better visibility
+        # Loop over position components
+        components = ['x', 'y', 'z']
+        for i, comp in enumerate(components):
+            fig, ax_traj = plt.subplots(1, 1, figsize=(12, 6))
 
-        # Plot clean vs denoised pos (Y-axis only) with thicker lines
-        ax_traj.plot(clean_pos_np[0, :, 0], label='Clean (ground truth) x', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_pos_np[0, :, 0], linestyle='--', label='Denoised (diffusion model) x', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_pos_np[0, :, 1], label='Clean (ground truth) y', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_pos_np[0, :, 1], linestyle='--', label='Denoised (diffusion model) y', linewidth=3.5, color='darkgreen')
-        ax_traj.plot(clean_pos_np[0, :, 2], label='Clean (ground truth) z', linewidth=3.5, color='darkblue')
-        ax_traj.plot(denoised_pos_np[0, :, 2], linestyle='--', label='Denoised (diffusion model) z', linewidth=3.5, color='darkgreen')
+            ax_traj.plot(clean_pos_np[0, :, i], label=f'Clean (ground truth) {comp}', linewidth=3.5, color='darkblue')
+            ax_traj.plot(denoised_pos_np[0, :, i], linestyle='--', label=f'Denoised (diffusion model) {comp}', linewidth=3.5, color='darkgreen')
 
-   
-        # Customize plot appearance with bold labels and increased font size
-        ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
-        ax_traj.set_ylabel(r'$\tilde{y}_o$ Position', fontsize=16, fontweight='bold')  # Y-label with tilde notation
-        ax_traj.set_title(f'Clean vs denoised zero force pos in y-direction - Sample {sample_idx+1}', 
-                        fontsize=18, fontweight='bold')
+            ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
+            ax_traj.set_ylabel(rf'$\tilde{{{comp}}}_o$ Position', fontsize=16, fontweight='bold')
+            ax_traj.set_title(f'Clean vs Denoised Position ({comp}-axis) - Sample {sample_idx+1}', 
+                            fontsize=18, fontweight='bold')
 
-        ax_traj.legend(fontsize=14)
+            ax_traj.legend(fontsize=14)
+            ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
+            ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
 
-        # Make grid lines more visible
-        ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
-
-        # Increase tick label size and make ticks thicker
-        ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
-
-        # Define save path for the plot
-        plot_filename = os.path.join(save_path, f"pos_sample_{sample_idx+1}.png")
-
-        # Save the figure
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-
-        # Show plots without blocking execution
-        #plt.show(block=False)
-
-        # Close the figure to free memory
-        plt.close(fig)
+            # Define and save each component-specific plot
+            plot_filename = os.path.join(save_path, f"pos_sample_{sample_idx+1}_{comp}.png")
+            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
 
 
     # Define the path for the results file
@@ -496,13 +481,14 @@ def inference_simulation(model, application_loader, application_dataset, device,
         denoised_q = noisy_q.clone()
 
 
-        for _ in range(num_denoising_steps):
+        for step in range(num_denoising_steps):
+            predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
+            
+            denoised_pos = denoised_pos - predicted_noise[:, :, 0:3]  # Always update position
 
-            #print("here")
-
-            predicted_noise = model(denoised_pos, noisy_q ,force, moment) if use_forces else model(denoised_pos, denoised_q)
-            denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
-            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
+            # Update quaternion conditionally
+            if (step + 1) % 4 == 0:
+                denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:, :, 3:]))
 
         #print("here too")
         # Denormalize trajectories
@@ -551,17 +537,24 @@ def inference_simulation(model, application_loader, application_dataset, device,
         omega_np = omega.detach().cpu().numpy()
 
         #Compute translational and rotational stiffness with gt clean data and denoised
-        stiffness_trans = run_translation(lambda_matrix_np, noisy_pos_np, denoised_pos_np, dx_np, force_np)
-        stiffness_trans_gt = run_translation(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
-        stiffness_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
-        stiffness_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
+        stiffness_error_trans = run_translation(lambda_matrix_np, noisy_pos_np, denoised_pos_np, dx_np, force_np)
+        stiffness_error_trans_gt = run_translation(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
+        stiffness_error_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
+        stiffness_error_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
         
-        #print("Stiffness Translational GT:", stiffness_trans)
-        #print("Stiffness Translational Denoised:", stiffness_trans_gt)
-        #print("Stiffness Rotational GT:", stiffness_rot)
-        #print("Stiffness Rotational Denoised:", stiffness_rot_gt)
-
     
+
+        print("Stiffness Translational GT:", stiffness_error_trans)
+        print("Stiffness Translational Denoised:", stiffness_error_trans_gt)
+        print("Stiffness Rotational GT:", stiffness_error_rot)
+        print("Stiffness Rotational Denoised:", stiffness_error_rot_gt)
+
+        #calc stiffness
+        #stiffness standard value is 650 for translation and 100 for rotation
+        stiffness_trans = 650 - stiffness_error_trans
+        stiffness_trans_gt = 650 - stiffness_error_trans_gt
+        stiffness_rot = 100 - stiffness_error_rot
+        stiffness_rot_gt = 100 - stiffness_error_rot_gt
 
         # Use actual stiffness vectors instead of repeating scalar values
         stiffness_trans_gt_repeated = np.tile(stiffness_trans_gt.reshape(1, 3), (T, 1))  # Shape (T, 3)
@@ -581,10 +574,10 @@ def inference_simulation(model, application_loader, application_dataset, device,
         gt_k_r_values.append(stiffness_rot_gt)
 
         # Print for debugging
-        print(f"Stiffness in sequence {seq_idx + 1}")
-        print(f"Ground truth Translational Stiffness: {stiffness_trans_gt}, Estimated Translational Stiffness: {stiffness_trans}")
-        print(f"Ground truth Rotational Stiffness: {stiffness_rot_gt}, Estimated Rotational Stiffness: {stiffness_rot}")
-        print("______________________")
+        #print(f"Stiffness in sequence {seq_idx + 1}")
+        #print(f"Ground truth Translational Stiffness: {stiffness_trans_gt}, Estimated Translational Stiffness: {stiffness_trans}")
+        #print(f"Ground truth Rotational Stiffness: {stiffness_rot_gt}, Estimated Rotational Stiffness: {stiffness_rot}")
+        #print("______________________")
 
 
 
