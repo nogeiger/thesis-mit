@@ -741,7 +741,6 @@ void MyLBRClient::command()
     // ************************************************************
     // Control torque
     tau_motion = tau_translation + tau_rotation + (N * tau_q);
-    //tau_motion = tau_rotation + (N * tau_q);
 
     // Comment out for only gravity compensation
         //tau_motion = Eigen::VectorXd::Zero( myLBR->nq );

@@ -3,7 +3,7 @@ import numpy as np
 from multiprocessing import shared_memory
 from avp_stream import VisionProStreamer
 
-avp_ip = "10.29.142.181"
+avp_ip = "10.31.130.110"
 s = VisionProStreamer(ip=avp_ip, record=True)
 
 finger_closed = True
@@ -50,6 +50,7 @@ try:
             np.array(r['right_wrist'], dtype=np.float64).flatten(),
             np.array([float(finger_closed)], dtype=np.float64),
         ])
+        #print("right_wrist: ", r['right_wrist'])
 
         #finger_closed = True#r['right_pinch_distance'] < 0.01
         #print("data storage: ", data_storage)

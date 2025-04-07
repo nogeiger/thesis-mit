@@ -91,13 +91,13 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 
     /** Initialization */
     // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    qInitial[0] = -8.87 * M_PI/180;
-    qInitial[1] = 60.98 * M_PI/180;
-    qInitial[2] = 17.51 * M_PI/180;
-    qInitial[3] = -79.85 * M_PI/180;
-    qInitial[4] = -24.13 * M_PI/180;
-    qInitial[5] = 43.03 * M_PI/180;
-    qInitial[6] = 4.14 * M_PI/180;
+    qInitial[0] = 5.59 * M_PI/180;
+    qInitial[1] = 50.76 * M_PI/180;
+    qInitial[2] = 0.04 * M_PI/180;
+    qInitial[3] = -86.34 * M_PI/180;
+    qInitial[4] = -3.49 * M_PI/180;
+    qInitial[5] = 40.25 * M_PI/180;
+    qInitial[6] = 92.61 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
     myLBR = new iiwa14( 1, "Trey");
@@ -433,13 +433,16 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
-//    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
-//    R_corrected.col(1) = -R_avp_rw.col(2);       // Z becomes Y (inverted)
-//    R_corrected.col(2) = R_avp_rw.col(1);        // Y becomes Z
 
-    R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
-    R_corrected.col(1) = R_avp_rw.col(2);       // Z becomes Y (inverted)
-    R_corrected.col(2) = -R_avp_rw.col(1);        // Y becomes Z
+    // // Old code for reference
+    // R_corrected.col(0) = R_avp_rw.col(0);        // X remains the same
+    // R_corrected.col(1) = R_avp_rw.col(1);       // Z becomes Y (inverted)
+    // R_corrected.col(2) = R_avp_rw.col(2);        // Y becomes Z
+
+    // // New code for reference (x-axis is mirrored)
+    R_corrected.col(0) = R_avp_rw.col(2);           // X becomes Z
+    R_corrected.col(1) = R_avp_rw.col(0);           // Y becomes X         
+    R_corrected.col(2) = -R_avp_rw.col(1);          // Z becomes Y (inverted)
 
     R_avp_rw = R_corrected;
 
@@ -681,7 +684,6 @@ void MyLBRClient::command()
 
     Eigen::MatrixXd N = Eigen::MatrixXd::Identity(7, 7) - J.transpose() * J_bar.transpose();
 
-    //Eigen::VectorXd tau_q = Kq * (q_ini - q) - Bq * dq;
     Eigen::VectorXd tau_q = Bq * dq;
 
     // ************************************************************
@@ -689,7 +691,7 @@ void MyLBRClient::command()
     tau_motion = tau_translation + tau_rotation + (N * tau_q);
 
     // Comment out for only gravity compensation
-    //    tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
+    // tau_motion = Eigen::VectorXd::Zero( myLBR->nq );
 
     // Include joint limits
     tau_motion = myLBR->addIIWALimits( q, dq, M, tau_motion, 0.004 );
@@ -783,7 +785,7 @@ void MyLBRClient::runStreamerThread() {
     try {
         // Create or open shared memory
         boost::interprocess::shared_memory_object shm(
-            boost::interprocess::open_or_create, "SharedMemory_AVP", boost::interprocess::read_write);
+            boost::interprocess::open_or_create, "SharedMemory_AVP_new", boost::interprocess::read_write);
 
         // Resize shared memory to hold a 4x4 double matrix (16 doubles, each 8 bytes) + version counter (8 bytes)
         // New: 6 * 16 doubles + ready flag 8 bytes = 6 * 16 * sizeof(double) + sizeof(int64_t)
