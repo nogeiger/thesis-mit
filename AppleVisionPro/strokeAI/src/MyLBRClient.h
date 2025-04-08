@@ -129,10 +129,14 @@ private:
     Eigen::MatrixXd p_avp_rw;
     Eigen::MatrixXd p_avp_rw_prev;
     Eigen::MatrixXd p_avp_rw_prev_prev;
+    Eigen::MatrixXd p_avp_rw_prev_prev_prev;
+    Eigen::MatrixXd p_avp_rw_prev_prev_prev_prev;
 
     Eigen::MatrixXd R_avp_rw;
     Eigen::MatrixXd R_avp_rw_prev;
     Eigen::MatrixXd R_avp_rw_prev_prev;
+    Eigen::MatrixXd R_avp_rw_prev_prev_prev;
+    Eigen::MatrixXd R_avp_rw_prev_prev_prev_prev;
 
     // Create iiwa as child of primitive class
     iiwa14 *myLBR;
