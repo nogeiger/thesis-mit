@@ -90,15 +90,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
 {
 
     /** Initialization */
-    // THIS CONFIGURATION MUST BE THE SAME AS FOR THE JAVA APPLICATION!!
-    // qInitial[0] = -8.87 * M_PI/180;
-    // qInitial[1] = 60.98 * M_PI/180;
-    // qInitial[2] = 17.51 * M_PI/180;
-    // qInitial[3] = -79.85 * M_PI/180;
-    // qInitial[4] = -24.13 * M_PI/180;
-    // qInitial[5] = 43.03 * M_PI/180;
-    // qInitial[6] = 4.14 * M_PI/180;
-
+    // JOY's configuration
     qInitial[0] = -11.46 * M_PI/180;
     qInitial[1] = 95.12 * M_PI/180;
     qInitial[2] = 6.37 * M_PI/180;
@@ -108,7 +100,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     qInitial[6] = 44.49 * M_PI/180;
 
     // Use Explicit-cpp to create your robot
-    myLBR = new iiwa14( 1, "Trey");
+    myLBR = new iiwa14( 1, "Dwight");
     myLBR->init( );
 
     // Current joint configuration and velocity
@@ -238,7 +230,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     // Store data
     // ************************************************************
 
-    std::string subject_id = "s1";        // Change per subject
+    std::string subject_id = "s0";        // Change per subject
     std::string movement = "lift";        // Options: lift, oop, adl
     std::string condition = "p";          // Options: p, a, m
 
@@ -249,7 +241,7 @@ MyLBRClient::MyLBRClient(double freqHz, double amplitude)
     char time_buffer[50];
     std::strftime(time_buffer, sizeof(time_buffer), "_%Y-%m-%d_%H-%M-%S", localTime); 
 
-    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/avp_stream/prints/" + subject_id + "_" + movement + "_" + condition + "_"
+    std::string filename = "/home/newman_lab/Desktop/noah_repo/thesis-mit/AppleVisionPro/strokeAI/prints/" + subject_id + "_" + movement + "_" + condition + "_"
                              + time_buffer + ".bin";
 
     // Open a uniquely named binary file
@@ -458,13 +450,15 @@ void MyLBRClient::command()
     R_avp_rw = H_avp_rw.transpose().block< 3, 3 >( 0, 0 );
 
     Eigen::MatrixXd R_corrected = R_avp_rw;
-    //R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
-    //R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)         
-    //R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
+    // R_corrected.col(0) = R_avp_rw.col(0);           // X remains the same
+    // R_corrected.col(1) = R_avp_rw.col(2);           // Z becomes Y (inverted)         
+    // R_corrected.col(2) = -R_avp_rw.col(1);          // Y becomes Z
 
+    // Experiment with Joy 
     R_corrected.col(0) = R_avp_rw.col(1);           // X gets Y
     R_corrected.col(1) = -R_avp_rw.col(2);           // Y becomes Z (inverted)         
     R_corrected.col(2) = -R_avp_rw.col(0);          // Z becomes X (inverted)
+
 
     R_avp_rw = R_corrected;
 
