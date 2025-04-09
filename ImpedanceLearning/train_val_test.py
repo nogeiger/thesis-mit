@@ -49,7 +49,7 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
     # Initialize ReduceLROnPlateau
     lr_scheduler_patience = min(5, int(early_stop_patience * 0.32))  # Reduce LR after 1/3 of early stopping patience
     #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=lr_scheduler_patience, verbose=True)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15, verbose=True)
 
 
 
@@ -95,10 +95,12 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
+            #print("model output training: ",predicted_noise)
 
             #print("pos loss", predicted_noise[:,:,0:3])
             #print("q loss", 10* predicted_noise[:,:,3:])
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+            #loss =  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
             #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
@@ -215,9 +217,10 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_q, force, moment)
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
-
+            #print("model output validation: ",predicted_noise)
             # Calculate loss
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
+           # loss =  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -247,7 +250,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     val_data = list(val_loader.dataset)
 
     # Randomly select `num_samples` different indices from the validation dataset
-    sample_indices = random.sample(range(len(val_data)), num_samples)
+    #sample_indices = random.sample(range(len(val_data)), num_samples)
 
     # Initialize lists for mean absolute differences
     mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
@@ -255,9 +258,9 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     mean_diffs_axis_alpha = []
 
 
-    for sample_idx, idx in enumerate(sample_indices):
+    for sample_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(val_data, desc="Testing", leave=True)):
         # Fetch a **random sample** instead of always using the first batch
-        pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
+        #pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
    
         # Move data to the correct device
         clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
@@ -275,6 +278,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         for i in range(num_denoising_steps):
       
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
+            #print("model output testing: ",predicted_noise)
             denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
 
@@ -459,21 +463,22 @@ def inference_simulation(model, application_loader, application_dataset, device,
     # Persistent storage for all data
     all_data = []
 
-    for seq_idx in range(num_sequences):
+    #for _, seq_idx in enumerate(num_sequences):
+    for seq_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(application_loader, desc="Inference simulation", leave=True)):
         # Fetch the sequence in order
-        pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
+        #pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
 
         # Move data to the correct device
-        clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
-        noisy_pos = pos.unsqueeze(0).to(device)
-        clean_q = q_0.unsqueeze(0).to(device)
-        noisy_q = q.unsqueeze(0).to(device)
-        force = force.unsqueeze(0).to(device)
-        moment = moment.unsqueeze(0).to(device)
-        dx = dx.unsqueeze(0).to(device)
-        omega = omega.unsqueeze(0).to(device)
-        lambda_matrix = lambda_matrix.unsqueeze(0).to(device)
-        lambda_w_matrix = lambda_w_matrix.unsqueeze(0).to(device)
+        clean_pos = pos_0.to(device)  # Add batch dimension
+        noisy_pos = pos.to(device)
+        clean_q = q_0.to(device)
+        noisy_q = q.to(device)
+        force = force.to(device)
+        moment = moment.to(device)
+        dx = dx.to(device)
+        omega = omega.to(device)
+        lambda_matrix = lambda_matrix.to(device)
+        lambda_w_matrix = lambda_w_matrix.to(device)
 
 
         # Start iterative denoising
@@ -482,13 +487,14 @@ def inference_simulation(model, application_loader, application_dataset, device,
 
 
         for step in range(num_denoising_steps):
+            #print("denoised pos shape", denoised_pos.shape)
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
             
             denoised_pos = denoised_pos - predicted_noise[:, :, 0:3]  # Always update position
 
             # Update quaternion conditionally
-            if (step + 1) % 4 == 0:
-                denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:, :, 3:]))
+            #if (step + 1) % 4 == 0:
+            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:, :, 3:]))
 
         #print("here too")
         # Denormalize trajectories
@@ -507,7 +513,7 @@ def inference_simulation(model, application_loader, application_dataset, device,
             #Preprocessing of denoise
 
             # Apply smoothing using a moving average filter
-            window_size = 20  # Adjust the window size based on smoothing needs
+            window_size = 8  # Adjust the window size based on smoothing needs
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
             #smoothing for q using slerp with sliding window
             denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
@@ -542,19 +548,18 @@ def inference_simulation(model, application_loader, application_dataset, device,
         stiffness_error_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
         stiffness_error_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
         
-    
-
-        print("Stiffness Translational GT:", stiffness_error_trans)
-        print("Stiffness Translational Denoised:", stiffness_error_trans_gt)
-        print("Stiffness Rotational GT:", stiffness_error_rot)
-        print("Stiffness Rotational Denoised:", stiffness_error_rot_gt)
-
+        
         #calc stiffness
         #stiffness standard value is 650 for translation and 100 for rotation
         stiffness_trans = 650 - stiffness_error_trans
         stiffness_trans_gt = 650 - stiffness_error_trans_gt
         stiffness_rot = 100 - stiffness_error_rot
         stiffness_rot_gt = 100 - stiffness_error_rot_gt
+
+        #print("Stiffness Translational GT:", stiffness_trans)
+        #print("Stiffness Translational Denoised:", stiffness_trans_gt)
+        #print("Stiffness Rotational GT:", stiffness_rot)
+        #print("Stiffness Rotational Denoised:", stiffness_rot_gt)
 
         # Use actual stiffness vectors instead of repeating scalar values
         stiffness_trans_gt_repeated = np.tile(stiffness_trans_gt.reshape(1, 3), (T, 1))  # Shape (T, 3)
@@ -615,17 +620,28 @@ def inference_simulation(model, application_loader, application_dataset, device,
         # Ensure quaternions are on CPU and converted to NumPy
         denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
         clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
+        #diff = denoised_q_np - clean_q_np               # Shape: (1, 16, 4)
+        #diff_norms = np.linalg.norm(diff, axis=-1)      # Euclidean norm for each quaternion difference, shape: (1, 16)
+        #mean_diff = np.mean(diff_norms)                 # Scalar
+
+        #print("Mean quaternion difference:", mean_diff)
         # Compute rotation angle theta from quaternions
-        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
-        # Normalize the entire denoised quaternion
+        # Normalize both sets
+        clean_q_np /= np.linalg.norm(clean_q_np, axis=-1, keepdims=True)
         denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True)
-        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
-        # Ensure angles are in degrees first (optional if already in radians)
+
+        # Extract rotation angles from w = cos(theta/2)
+        theta_clean = 2 * np.arccos(np.clip(np.abs(clean_q_np[0,:, 0]), -1.0, 1.0))
+        theta_denoised = 2 * np.arccos(np.clip(np.abs(denoised_q_np[0,:, 0]), -1.0, 1.0))
+
+        # Convert to degrees for human-friendly display
         theta_clean_deg = np.degrees(theta_clean)
         theta_denoised_deg = np.degrees(theta_denoised)
-        # Compute angular difference with wrap-around handling
+
+        # Compute wrapped difference
         theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
-        # Compute mean error
+
+        # Mean error
         mean_theta_error = np.mean(theta_error)
         mean_diffs_theta.append(mean_theta_error)
 
