@@ -258,17 +258,17 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     mean_diffs_axis_alpha = []
 
 
-    for sample_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(val_data, desc="Testing", leave=True)):
+    for sample_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(val_loader, desc="Testing", leave=True)):
         # Fetch a **random sample** instead of always using the first batch
         #pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
    
         # Move data to the correct device
-        clean_pos = pos_0.unsqueeze(0).to(device)  # Add batch dimension
-        noisy_pos = pos.unsqueeze(0).to(device)
-        clean_q = q_0.unsqueeze(0).to(device)
-        noisy_q = q.unsqueeze(0).to(device)
-        force = force.unsqueeze(0).to(device)
-        moment = moment.unsqueeze(0).to(device)
+        clean_pos = pos_0.to(device)  # Add batch dimension
+        noisy_pos = pos.to(device)
+        clean_q = q_0.to(device)
+        noisy_q = q.to(device)
+        force = force.to(device)
+        moment = moment.to(device)
     
 
         # Start iterative denoising
@@ -620,30 +620,21 @@ def inference_simulation(model, application_loader, application_dataset, device,
         # Ensure quaternions are on CPU and converted to NumPy
         denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
         clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
-        #diff = denoised_q_np - clean_q_np               # Shape: (1, 16, 4)
-        #diff_norms = np.linalg.norm(diff, axis=-1)      # Euclidean norm for each quaternion difference, shape: (1, 16)
-        #mean_diff = np.mean(diff_norms)                 # Scalar
-
-        #print("Mean quaternion difference:", mean_diff)
         # Compute rotation angle theta from quaternions
-        # Normalize both sets
-        clean_q_np /= np.linalg.norm(clean_q_np, axis=-1, keepdims=True)
-        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True)
-
-        # Extract rotation angles from w = cos(theta/2)
-        theta_clean = 2 * np.arccos(np.clip(np.abs(clean_q_np[0,:, 0]), -1.0, 1.0))
-        theta_denoised = 2 * np.arccos(np.clip(np.abs(denoised_q_np[0,:, 0]), -1.0, 1.0))
-
-        # Convert to degrees for human-friendly display
+        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
+        # Normalize the entire denoised quaternion
+        epsilon = 1e-8  # Small value to avoid division by zero
+        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True) + epsilon
+        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
+        # Ensure angles are in degrees first (optional if already in radians)
         theta_clean_deg = np.degrees(theta_clean)
         theta_denoised_deg = np.degrees(theta_denoised)
-
-        # Compute wrapped difference
+        # Compute angular difference with wrap-around handling
         theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
-
-        # Mean error
+        # Compute mean error
         mean_theta_error = np.mean(theta_error)
         mean_diffs_theta.append(mean_theta_error)
+
 
         # Compute axis-angle representation and loss of alpha for quaternions
         # Extract rotation axes (u) from quaternions
