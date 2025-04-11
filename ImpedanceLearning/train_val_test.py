@@ -95,14 +95,8 @@ def train_model_diffusion(model, traindataloader, valdataloader,optimizer, crite
             
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
-            #print("model output training: ",predicted_noise)
 
-            #print("pos loss", predicted_noise[:,:,0:3])
-            #print("q loss", 10* predicted_noise[:,:,3:])
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-            #loss =  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-            #print(f"pos loss: {criterion(predicted_noise[:,:,0:3], actual_noise_pos) }")
-            #print(f"q loss: {quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)}")
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000  # Normalize loss by noise scale
             loss.backward()
 
@@ -217,10 +211,8 @@ def validate_model_diffusion(model, dataloader, criterion, device, max_noiseaddi
                 predicted_noise = model(noisy_pos, noisy_q, force, moment)
             else:
                 predicted_noise = model(noisy_pos, noisy_q)
-            #print("model output validation: ",predicted_noise)
             # Calculate loss
             loss = criterion(predicted_noise[:,:,0:3], actual_noise_pos) +   quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
-           # loss =  quaternion_loss(predicted_noise[:,:,3:], actual_noise_q)
             loss = loss / torch.clamp(noise_scale, min=1e-6) * 10000
             total_loss += loss.item()
 
@@ -249,40 +241,31 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
     # Convert validation dataset into a list (ensures correct indexing)
     val_data = list(val_loader.dataset)
 
-    # Randomly select `num_samples` different indices from the validation dataset
-    #sample_indices = random.sample(range(len(val_data)), num_samples)
-
     # Initialize lists for mean absolute differences
     mean_diffs_pos_x, mean_diffs_pos_y, mean_diffs_pos_z, overall_mean_diffs_pos = [], [], [], []
     mean_diffs_theta = []
     mean_diffs_axis_alpha = []
-
+    mean_q_diffs = []
 
     for sample_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(val_loader, desc="Testing", leave=True)):
-        # Fetch a **random sample** instead of always using the first batch
-        #pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = val_data[idx]
-   
+
         # Move data to the correct device
-        clean_pos = pos_0.to(device)  # Add batch dimension
+        clean_pos = pos_0.to(device)
         noisy_pos = pos.to(device)
         clean_q = q_0.to(device)
         noisy_q = q.to(device)
         force = force.to(device)
         moment = moment.to(device)
-    
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
         denoised_q = noisy_q.clone()
 
         for i in range(num_denoising_steps):
-      
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
-            #print("model output testing: ",predicted_noise)
-            denoised_pos = denoised_pos - predicted_noise[:,:,0:3]  # Remove noise iteratively
-            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:,:,3:]))
+            denoised_pos = denoised_pos - predicted_noise[:, :, 0:3]
+            denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:, :, 3:]))
 
-       
         # Denormalize trajectories
         noisy_pos_np = val_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = val_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -295,81 +278,84 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         force_np = val_dataset.denormalize(force.detach().cpu(), "force").numpy()
         moment_np = val_dataset.denormalize(moment.detach().cpu(), "force").numpy()
 
-        if postprocessing == True:
-            #Preprocessing of denoise
-
+        if postprocessing:
             # Apply smoothing using a moving average filter
-            window_size = 8  # Adjust the window size based on smoothing needs
+            window_size = 8
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
-            #smoothing for q using slerp with sliding window
             denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
 
-            #remove offses
-            # Compute the offset using the average of the first 5 points difference
+            # Remove offsets
             offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
-            # Apply the offset to all points in the denoised pos
             denoised_pos_np += offset_pos[:, np.newaxis, :]
-            #for quaternions
+
             q_offset = quaternion_multiply(clean_q[:, 0, :], quaternion_inverse(denoised_q[:, 0, :]))
-            # Apply offset correction to the entire sequence
-            for t in range(denoised_q.shape[1]):  # Iterate over timesteps
+            for t in range(denoised_q.shape[1]):
                 denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
 
-            denoised_q_np = denoised_q
+            denoised_q_np = denoised_q.detach().cpu().numpy()
 
-
-        # Compute mean absolute differences
+        # Compute mean absolute differences in position
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
         mean_diff_y = np.mean(np.abs(clean_pos_np[:, :, 1] - denoised_pos_np[:, :, 1]))
         mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
         overall_mean_diff_pos = np.mean(np.abs(clean_pos_np - denoised_pos_np))
 
-        # Append mean differences to lists
         mean_diffs_pos_x.append(mean_diff_x)
         mean_diffs_pos_y.append(mean_diff_y)
         mean_diffs_pos_z.append(mean_diff_z)
         overall_mean_diffs_pos.append(overall_mean_diff_pos)
 
-        # Compute angular differences theta of quaternions
-        # Ensure quaternions are on CPU and converted to NumPy
-        denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
-        clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
-        # Compute rotation angle theta from quaternions
-        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
-        # Normalize the entire denoised quaternion
-        epsilon = 1e-8  # Small value to avoid division by zero
-        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True) + epsilon
-        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
-        # Ensure angles are in degrees first (optional if already in radians)
-        theta_clean_deg = np.degrees(theta_clean)
-        theta_denoised_deg = np.degrees(theta_denoised)
-        # Compute angular difference with wrap-around handling
-        theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
-        # Compute mean error
-        mean_theta_error = np.mean(theta_error)
+        # Compute relative quaternion: q_rel = clean_q * inv(denoised_q)
+        clean_q = clean_q / (clean_q.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_q = denoised_q / (denoised_q.norm(dim=-1, keepdim=True) + 1e-8)
+
+        q_rel = quaternion_multiply(clean_q, quaternion_inverse(denoised_q))
+        q_rel = q_rel / q_rel.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+
+        # ---- Theta: rotation angle difference (aligned with loss function) ----
+        # Flip predicted quaternion to same hemisphere as target
+        dot = torch.sum(denoised_q * clean_q, dim=-1, keepdim=True)
+        denoised_q_flipped = torch.where(dot < 0, -denoised_q, denoised_q)
+
+        # Compute rotation angles
+        theta_clean = 2 * torch.acos(torch.clamp(clean_q[..., 0], -1.0, 1.0))
+        theta_denoised = 2 * torch.acos(torch.clamp(denoised_q_flipped[..., 0], -1.0, 1.0))
+
+        # Angle difference with wrap-around
+        theta_diff = torch.abs(theta_clean - theta_denoised)
+        theta_diff = torch.minimum(theta_diff, 2 * torch.pi - theta_diff)
+
+        # Degrees
+        theta_diff_deg = torch.rad2deg(theta_diff)
+        mean_theta_error = theta_diff_deg.mean().item()
         mean_diffs_theta.append(mean_theta_error)
 
+        # ---- Alpha: axis alignment error ----
+        clean_axis = quaternion_to_axis(clean_q.detach().cpu().numpy())
+        denoised_axis = quaternion_to_axis(denoised_q.detach().cpu().numpy())
+        clean_axis = torch.tensor(clean_axis, device=device, dtype=torch.float32)
+        denoised_axis = torch.tensor(denoised_axis, device=device, dtype=torch.float32)
 
+        clean_axis = clean_axis / (clean_axis.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_axis = denoised_axis / (denoised_axis.norm(dim=-1, keepdim=True) + 1e-8)
 
-        # Compute axis-angle representation and loss of alpha for quaternions
-        # Extract rotation axes (u) from quaternions
-        u_clean = quaternion_to_axis(clean_q_np[0,:, :])  # Shape (T, 3)
-        u_denoised = quaternion_to_axis(denoised_q_np[0,:, :])  # Shape (T, 3)
-        # Compute angular difference between axes (for calc of cosine - cosine(theta>1) values leads to instability)
-        dot_product_u = np.einsum('ij,ij->i', u_clean, u_denoised)  # Batch-wise dot product
-        # Fix: Take absolute value to handle u and -u equivalence
-        dot_product_u = np.clip(np.abs(dot_product_u), -1.0, 1.0)  
+        dot_product = torch.sum(clean_axis * denoised_axis, dim=-1)
+        dot_product = torch.clamp(torch.abs(dot_product), -1.0, 1.0)
+        alpha_error = torch.acos(dot_product)
+        alpha_error_deg = torch.rad2deg(alpha_error)
+        mean_alpha_error = alpha_error_deg.mean().item()
+        mean_diffs_axis_alpha.append(mean_alpha_error)
 
-        # Compute angle difference
-        alpha_error = np.arccos(dot_product_u)  # Angle difference in radians
+        # ---- Quaternion difference (geodesic loss) ----
+        clean_q_norm = clean_q / (clean_q.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_q_norm = denoised_q / (denoised_q.norm(dim=-1, keepdim=True) + 1e-8)
+        dot = torch.sum(clean_q_norm * denoised_q_norm, dim=-1, keepdim=True)
+        denoised_q_norm = torch.where(dot < 0, -denoised_q_norm, denoised_q_norm)
 
-        # Convert to degrees
-        alpha_error_deg = np.degrees(alpha_error)
-
-        # Compute mean axis error
-        mean_alpha_error = np.mean(alpha_error_deg)
-        mean_diffs_axis_alpha.append(mean_alpha_error) 
-
+        dot_product = torch.sum(clean_q_norm * denoised_q_norm, dim=-1)
+        dot_product = torch.clamp(torch.abs(dot_product), 0.0, 1.0 - 1e-8)
+        q_loss = torch.mean((1 - dot_product) ** 2).item()
+        mean_q_diffs.append(q_loss)
 
         # Loop over position components
         components = ['x', 'y', 'z']
@@ -381,18 +367,18 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
 
             ax_traj.set_xlabel('Time Step', fontsize=16, fontweight='bold')
             ax_traj.set_ylabel(rf'$\tilde{{{comp}}}_o$ Position', fontsize=16, fontweight='bold')
-            ax_traj.set_title(f'Clean vs Denoised Position ({comp}-axis) - Sample {sample_idx+1}', 
+            ax_traj.set_title(f'Clean vs Denoised Position ({comp}-axis) - Sample {sample_idx+1}',
                             fontsize=18, fontweight='bold')
 
             ax_traj.legend(fontsize=14)
             ax_traj.grid(True, linestyle="--", linewidth=1, alpha=0.7)
             ax_traj.tick_params(axis='both', labelsize=14, width=2.5, length=8)
 
-            # Define and save each component-specific plot
             plot_filename = os.path.join(save_path, f"pos_sample_{sample_idx+1}_{comp}.png")
             plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
             plt.close(fig)
 
+        
 
     # Define the path for the results file
     results_file = os.path.join(save_path, "test_results.txt")
@@ -406,6 +392,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         f"Overall: {np.mean(overall_mean_diffs_pos):.6f}\n\n"
         f"Theta: {np.mean(mean_diffs_theta):.6f}\n"
         f"Alpha: {np.mean(mean_diffs_axis_alpha):.6f}\n"
+        f"Mean Quaternion Difference: {np.mean(mean_q_diffs):.15f}\n"
     )
 
     # Print results to console
@@ -416,13 +403,7 @@ def test_model(model, val_loader, val_dataset, device, use_forces, save_path, nu
         file.write(results_text)
 
     print(f"Test results saved to {results_file}")
-
-
-    # Keep plots open until the user closes them
-    #plt.pause(0.1)
-    #input("Press Enter to close all plots and continue...")
     plt.close('all')
-
   
 
 
@@ -458,45 +439,33 @@ def inference_simulation(model, application_loader, application_dataset, device,
     mean_diffs_k_r = []
     gt_k_t_values = []
     gt_k_r_values = []
+    mean_q_diffs = []
+  
 
 
     # Persistent storage for all data
     all_data = []
 
-    #for _, seq_idx in enumerate(num_sequences):
     for seq_idx, (pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix) in enumerate(tqdm(application_loader, desc="Inference simulation", leave=True)):
         # Fetch the sequence in order
-        #pos_0, pos, q_0, q, force, moment, dx, omega, lambda_matrix, lambda_w_matrix = application_data[seq_idx]
 
-        # Move data to the correct device
-        clean_pos = pos_0.to(device)  # Add batch dimension
+        #Move data to the correct device
+        clean_pos = pos_0.to(device)
         noisy_pos = pos.to(device)
         clean_q = q_0.to(device)
         noisy_q = q.to(device)
         force = force.to(device)
         moment = moment.to(device)
-        dx = dx.to(device)
-        omega = omega.to(device)
-        lambda_matrix = lambda_matrix.to(device)
-        lambda_w_matrix = lambda_w_matrix.to(device)
-
 
         # Start iterative denoising
         denoised_pos = noisy_pos.clone()
         denoised_q = noisy_q.clone()
 
-
-        for step in range(num_denoising_steps):
-            #print("denoised pos shape", denoised_pos.shape)
+        for i in range(num_denoising_steps):
             predicted_noise = model(denoised_pos, denoised_q, force, moment) if use_forces else model(denoised_pos, denoised_q)
-            
-            denoised_pos = denoised_pos - predicted_noise[:, :, 0:3]  # Always update position
-
-            # Update quaternion conditionally
-            #if (step + 1) % 4 == 0:
+            denoised_pos = denoised_pos - predicted_noise[:, :, 0:3]
             denoised_q = quaternion_multiply(denoised_q, quaternion_inverse(predicted_noise[:, :, 3:]))
 
-        #print("here too")
         # Denormalize trajectories
         noisy_pos_np = application_dataset.denormalize(noisy_pos.detach().cpu(), "pos").numpy()
         clean_pos_np = application_dataset.denormalize(clean_pos.detach().cpu(), "pos_0").numpy()
@@ -508,30 +477,22 @@ def inference_simulation(model, application_loader, application_dataset, device,
 
         force_np = application_dataset.denormalize(force.detach().cpu(), "force").numpy()
         moment_np = application_dataset.denormalize(moment.detach().cpu(), "force").numpy()
-        #print("before postprocessing")
-        if postprocessing == True:
-            #Preprocessing of denoise
 
+        if postprocessing:
             # Apply smoothing using a moving average filter
-            window_size = 8  # Adjust the window size based on smoothing needs
+            window_size = 8
             denoised_pos_np = uniform_filter1d(denoised_pos_np, size=window_size, axis=1, mode='nearest')
-            #smoothing for q using slerp with sliding window
             denoised_q_np = smooth_quaternions_slerp(torch.tensor(denoised_q_np), window_size=window_size, smoothing_factor=0.5).numpy()
 
-            #remove offses
-            # Compute the offset using the average of the first 5 points difference
+            # Remove offsets
             offset_pos = np.mean(clean_pos_np[:, :1, :] - denoised_pos_np[:, :1, :], axis=1)
-            # Apply the offset to all points in the denoised pos
             denoised_pos_np += offset_pos[:, np.newaxis, :]
-            #for quaternions
+
             q_offset = quaternion_multiply(clean_q[:, 0, :], quaternion_inverse(denoised_q[:, 0, :]))
-            # Apply offset correction to the entire sequence
-            for t in range(denoised_q.shape[1]):  # Iterate over timesteps
+            for t in range(denoised_q.shape[1]):
                 denoised_q[:, t, :] = quaternion_multiply(q_offset, denoised_q[:, t, :])
 
-            denoised_q_np = denoised_q
-
-
+            denoised_q_np = denoised_q.detach().cpu().numpy()
 
         # Store all data in a structured format for txt file for matlab/robot
         T = clean_pos_np.shape[1]  # Sequence length
@@ -542,10 +503,11 @@ def inference_simulation(model, application_loader, application_dataset, device,
         lambda_w_matrix_np = lambda_w_matrix.detach().cpu().numpy()
         omega_np = omega.detach().cpu().numpy()
 
+
         #Compute translational and rotational stiffness with gt clean data and denoised
         stiffness_error_trans = run_translation(lambda_matrix_np, noisy_pos_np, denoised_pos_np, dx_np, force_np)
         stiffness_error_trans_gt = run_translation(lambda_matrix_np, noisy_pos_np,clean_pos_np, dx_np, force_np)
-        stiffness_error_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np.detach().cpu().numpy(), omega_np, moment_np)
+        stiffness_error_rot = run_rotation(lambda_w_matrix_np, noisy_q_np, denoised_q_np, omega_np, moment_np)
         stiffness_error_rot_gt = run_rotation(lambda_w_matrix_np, noisy_q_np, clean_q_np, omega_np, moment_np)
         
         
@@ -555,11 +517,6 @@ def inference_simulation(model, application_loader, application_dataset, device,
         stiffness_trans_gt = 650 - stiffness_error_trans_gt
         stiffness_rot = 100 - stiffness_error_rot
         stiffness_rot_gt = 100 - stiffness_error_rot_gt
-
-        #print("Stiffness Translational GT:", stiffness_trans)
-        #print("Stiffness Translational Denoised:", stiffness_trans_gt)
-        #print("Stiffness Rotational GT:", stiffness_rot)
-        #print("Stiffness Rotational Denoised:", stiffness_rot_gt)
 
         # Use actual stiffness vectors instead of repeating scalar values
         stiffness_trans_gt_repeated = np.tile(stiffness_trans_gt.reshape(1, 3), (T, 1))  # Shape (T, 3)
@@ -577,14 +534,6 @@ def inference_simulation(model, application_loader, application_dataset, device,
         # Store for later analysis
         gt_k_t_values.append(stiffness_trans_gt)
         gt_k_r_values.append(stiffness_rot_gt)
-
-        # Print for debugging
-        #print(f"Stiffness in sequence {seq_idx + 1}")
-        #print(f"Ground truth Translational Stiffness: {stiffness_trans_gt}, Estimated Translational Stiffness: {stiffness_trans}")
-        #print(f"Ground truth Rotational Stiffness: {stiffness_rot_gt}, Estimated Rotational Stiffness: {stiffness_rot}")
-        #print("______________________")
-
-
 
         for t in range(T):
             all_data.append([
@@ -604,57 +553,68 @@ def inference_simulation(model, application_loader, application_dataset, device,
 
             ])
 
-        # Compute mean absolute differences
+        # Compute mean absolute differences in position
         mean_diff_x = np.mean(np.abs(clean_pos_np[:, :, 0] - denoised_pos_np[:, :, 0]))
         mean_diff_y = np.mean(np.abs(clean_pos_np[:, :, 1] - denoised_pos_np[:, :, 1]))
         mean_diff_z = np.mean(np.abs(clean_pos_np[:, :, 2] - denoised_pos_np[:, :, 2]))
         overall_mean_diff_pos = np.mean(np.abs(clean_pos_np - denoised_pos_np))
 
-        # Append mean differences to lists
         mean_diffs_pos_x.append(mean_diff_x)
         mean_diffs_pos_y.append(mean_diff_y)
         mean_diffs_pos_z.append(mean_diff_z)
         overall_mean_diffs_pos.append(overall_mean_diff_pos)
 
-        # Compute angular differences theta of quaternions
-        # Ensure quaternions are on CPU and converted to NumPy
-        denoised_q_np = denoised_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
-        clean_q_np = clean_q.detach().cpu().numpy()  # Move to CPU and convert to NumPy
-        # Compute rotation angle theta from quaternions
-        theta_clean = 2 * np.arccos(np.clip(clean_q_np[0,:, 0], -1.0, 1.0))  # First component is cos(theta/2)
-        # Normalize the entire denoised quaternion
-        epsilon = 1e-8  # Small value to avoid division by zero
-        denoised_q_np /= np.linalg.norm(denoised_q_np, axis=-1, keepdims=True) + epsilon
-        theta_denoised = 2 * np.arccos(np.clip(denoised_q_np[0,:, 0], -1.0, 1.0))
-        # Ensure angles are in degrees first (optional if already in radians)
-        theta_clean_deg = np.degrees(theta_clean)
-        theta_denoised_deg = np.degrees(theta_denoised)
-        # Compute angular difference with wrap-around handling
-        theta_error = np.abs((theta_clean_deg - theta_denoised_deg + 180) % 360 - 180)
-        # Compute mean error
-        mean_theta_error = np.mean(theta_error)
+        # Compute relative quaternion: q_rel = clean_q * inv(denoised_q)
+        clean_q = clean_q / (clean_q.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_q = denoised_q / (denoised_q.norm(dim=-1, keepdim=True) + 1e-8)
+
+        q_rel = quaternion_multiply(clean_q, quaternion_inverse(denoised_q))
+        q_rel = q_rel / q_rel.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+
+        # ---- Theta: rotation angle difference (aligned with loss function) ----
+        # Flip predicted quaternion to same hemisphere as target
+        dot = torch.sum(denoised_q * clean_q, dim=-1, keepdim=True)
+        denoised_q_flipped = torch.where(dot < 0, -denoised_q, denoised_q)
+
+        # Compute rotation angles
+        theta_clean = 2 * torch.acos(torch.clamp(clean_q[..., 0], -1.0, 1.0))
+        theta_denoised = 2 * torch.acos(torch.clamp(denoised_q_flipped[..., 0], -1.0, 1.0))
+
+        # Angle difference with wrap-around
+        theta_diff = torch.abs(theta_clean - theta_denoised)
+        theta_diff = torch.minimum(theta_diff, 2 * torch.pi - theta_diff)
+
+        # Degrees
+        theta_diff_deg = torch.rad2deg(theta_diff)
+        mean_theta_error = theta_diff_deg.mean().item()
         mean_diffs_theta.append(mean_theta_error)
 
+        # ---- Alpha: axis alignment error ----
+        clean_axis = quaternion_to_axis(clean_q.detach().cpu().numpy())
+        denoised_axis = quaternion_to_axis(denoised_q.detach().cpu().numpy())
+        clean_axis = torch.tensor(clean_axis, device=device, dtype=torch.float32)
+        denoised_axis = torch.tensor(denoised_axis, device=device, dtype=torch.float32)
 
-        # Compute axis-angle representation and loss of alpha for quaternions
-        # Extract rotation axes (u) from quaternions
-        u_clean = quaternion_to_axis(clean_q_np[0,:, :])  # Shape (T, 3)
-        u_denoised = quaternion_to_axis(denoised_q_np[0,:, :])  # Shape (T, 3)
-        # Compute angular difference between axes (for calc of cosine - cosine(theta>1) values leads to instability)
-        dot_product_u = np.einsum('ij,ij->i', u_clean, u_denoised)  # Batch-wise dot product
-        # Fix: Take absolute value to handle u and -u equivalence
-        dot_product_u = np.clip(np.abs(dot_product_u), -1.0, 1.0)  
+        clean_axis = clean_axis / (clean_axis.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_axis = denoised_axis / (denoised_axis.norm(dim=-1, keepdim=True) + 1e-8)
 
-        # Compute angle difference
-        alpha_error = np.arccos(dot_product_u)  # Angle difference in radians
+        dot_product = torch.sum(clean_axis * denoised_axis, dim=-1)
+        dot_product = torch.clamp(torch.abs(dot_product), -1.0, 1.0)
+        alpha_error = torch.acos(dot_product)
+        alpha_error_deg = torch.rad2deg(alpha_error)
+        mean_alpha_error = alpha_error_deg.mean().item()
+        mean_diffs_axis_alpha.append(mean_alpha_error)
 
-        # Convert to degrees
-        alpha_error_deg = np.degrees(alpha_error)
+        # ---- Quaternion difference (geodesic loss) ----
+        clean_q_norm = clean_q / (clean_q.norm(dim=-1, keepdim=True) + 1e-8)
+        denoised_q_norm = denoised_q / (denoised_q.norm(dim=-1, keepdim=True) + 1e-8)
+        dot = torch.sum(clean_q_norm * denoised_q_norm, dim=-1, keepdim=True)
+        denoised_q_norm = torch.where(dot < 0, -denoised_q_norm, denoised_q_norm)
 
-        # Compute mean axis error
-        mean_alpha_error = np.mean(alpha_error_deg)
-        mean_diffs_axis_alpha.append(mean_alpha_error) 
-
+        dot_product = torch.sum(clean_q_norm * denoised_q_norm, dim=-1)
+        dot_product = torch.clamp(torch.abs(dot_product), 0.0, 1.0 - 1e-8)
+        q_loss = torch.mean((1 - dot_product) ** 2).item()
+        mean_q_diffs.append(q_loss)
 
 
         # Create a separate figure for each sample
@@ -725,8 +685,8 @@ def inference_simulation(model, application_loader, application_dataset, device,
         f"Mean Stiffness Rotational: {np.mean(mean_diffs_k_r):.6f}\n"
         f"Mean Translational Stiffness Error: {mean_k_t_error:.6f} (Percentage: {percent_error_k_t:.2f}%)\n"
         f"Mean Rotational Stiffness Error: {mean_k_r_error:.6f} (Percentage: {percent_error_k_r:.2f}%)\n"
-
-    )
+        f"Mean Quaternion Difference: {np.mean(mean_q_diffs):.15f}\n"
+            )
 
     # Print results to console
     print(results_text)
@@ -767,4 +727,3 @@ def inference_simulation(model, application_loader, application_dataset, device,
     df.to_csv(output_file, sep='\t', index=False)
 
     print(f"Results saved to {output_file}")
-    

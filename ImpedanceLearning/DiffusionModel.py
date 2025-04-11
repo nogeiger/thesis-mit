@@ -10,11 +10,11 @@ import random
 from models import NoisePredictorInitial, NoisePredictorLSTM, NoisePredictorTransformer, NoisePredictorGRU, NoisePredictorConv1D,NoisePredictorTCN, NoisePredictorWithCrossAttention, NoisePredictorTransformerWithCrossAttention
 from data import ImpedanceDatasetDiffusion, load_robot_data, compute_statistics_per_axis, normalize_data_per_axis
 from train_val_test import train_model_diffusion, validate_model_diffusion, test_model, inference_simulation
-from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor
+from utils import loss_function, loss_function_start_point, add_noise, calculate_max_noise_factor, set_seed
 from datetime import datetime
 import gc
 
-np.random.seed(42)
+set_seed(42)  # Set seed for reproducibility
 def main():
     """
     Main function to execute the training and validation of the NoisePredictor model.
@@ -29,7 +29,7 @@ def main():
     input_dim = seq_length * 3  # Flattened input dimension
     hidden_dim = 512 #FF#512#(Conv1D)#512(TCN)#256(Transformer#512(FF) #hidden dim of the model
     batch_size =64 #batch size
-    num_epochs = 2#500#2#0#500#number of epochs
+    num_epochs = 500#number of epochs
     learning_rate = 1e-3 #1e-3 FF#learning rate
     noiseadding_steps = 20#20 # Number of steps to add noise
     use_forces = True  # Set this to True if you want to use forces as input to the model
@@ -38,12 +38,12 @@ def main():
     if noise_with_force:
             use_forces = False
     beta_start = 0.0001 #for the noise diffusion model
-    beta_end = 0.02#0.02 #for the noise diffusion model
+    beta_end = 0.04#0.02 #for the noise diffusion model
     max_grad_norm=7.0 #max grad norm for gradient clipping 
     add_gaussian_noise = False#True # to add additional guassian noise
-    early_stop_patience = 20 #for early stopping
+    early_stop_patience = 50 #for early stopping
     save_interval = 20
-    save_path = "save_checkpoints/TestInference"
+    save_path = "save_checkpoints/TestInference/ErrorSearch"
     timestamp = datetime.now().strftime("%Y-%"
     "m-%d_%H-%M-%S")
 
@@ -66,7 +66,7 @@ def main():
 
     # File path to the real data
     file_path = "Data/RealData"
-    file_path_application = "Data/RealDataGT"
+    file_path_application = "Data/PushDown"
     # Load real data
     data = load_robot_data(file_path, seq_length, use_overlap=True)
     data_application = load_robot_data(file_path_application, seq_length, use_overlap=False)
@@ -100,15 +100,13 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     application_loader = DataLoader(application_dataset, batch_size=1, shuffle=False)
- 
-
 
     
     # Model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_name = "FFWeigth5"
-    #model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
-    model = NoisePredictorWithCrossAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
+    model_name = "FF_Rehabilitation"
+    model = NoisePredictorInitial(seq_length, hidden_dim, use_forces=use_forces).to(device) 
+    #model = NoisePredictorWithCrossAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTransformerWithCrossAttention(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTransformer(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorTCN(seq_length, hidden_dim, use_forces=use_forces).to(device)
@@ -116,8 +114,6 @@ def main():
     #model = NoisePredictorGRU(seq_length, hidden_dim, use_forces=use_forces).to(device)
     #model = NoisePredictorConv1D(seq_length, hidden_dim, use_forces=use_forces).to(device)
     
-
-
     # Save hyperparameters
     save_path = os.path.join(save_path, f"{model_name}_{timestamp}")
     os.makedirs(save_path, exist_ok=True)
@@ -125,15 +121,12 @@ def main():
     with open(os.path.join(save_path, "hyperparameters.txt"), "w") as f:
         for key, value in hyperparams.items():
             f.write(f"{key}: {value}\n")
-
-
     
     #choose optimizer
     #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     #Choose loss
     #criterion = nn.MSELoss()
-    #criterion = loss_function_start_point
     criterion=nn.SmoothL1Loss()
     print("_____________________________________________")
     print("-----Training and Validation-----")
@@ -191,27 +184,24 @@ def main():
     save_path_test_processed = os.path.join(save_path, f"{model_name}_{timestamp}_test_postprocessed")
     os.makedirs(save_path_test_processed, exist_ok=True)
 
-    
     # Testing
     # Clear GPU memory after training
     del train_loader, val_loader, train_dataset, val_dataset
     torch.cuda.empty_cache()
-
-
     
     # Load best model
     best_model_path = os.path.join(save_path, "best_model.pth")
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.to(device)
+    print("best model loaded")
     
-    print("_____________________________________________")
-    print("-----Test model without postprocessing-----")
-    test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=False)
+    #print("_____________________________________________")
+    #print("-----Test model without postprocessing-----")
+    #test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=False)
     print("_____________________________________________")
     print("-----Test model with postprocessing-----")
     test_model(model, test_loader, test_dataset, device, use_forces, save_path = save_path_test_processed, num_denoising_steps=noiseadding_steps, num_samples=len(test_loader), postprocessing=True)
-    
-    
+
     #Inference application
     # Clear GPU memory after testing
     del test_loader, test_dataset
@@ -220,10 +210,8 @@ def main():
     save_path_application = os.path.join(save_path, f"{model_name}_{timestamp}_inference_application")
     os.makedirs(save_path_application, exist_ok=True)
 
-    
-    
     # Number of sequences to process (adjust as needed)
-    num_application_sequences = 100#len(application_loader)
+    num_application_sequences = len(application_loader)
     print("_____________________________________________")
     print("-----Inference on application data-----")
     # Run inference on application data
@@ -238,7 +226,6 @@ def main():
         num_denoising_steps=noiseadding_steps,
         postprocessing=True  # Set to False if you don't want postprocessing
     )
-    
     
     
 if __name__ == "__main__":
